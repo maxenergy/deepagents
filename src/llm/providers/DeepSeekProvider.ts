@@ -9,34 +9,32 @@ import {
 import { BaseLLMProvider } from '../BaseLLMProvider';
 
 /**
- * Anthropic提供商配置接口
+ * DeepSeek提供商配置接口
  */
-export interface AnthropicProviderConfig extends LLMProviderConfig {
+export interface DeepSeekProviderConfig extends LLMProviderConfig {
   apiKey: string;
   apiUrl?: string;
 }
 
 /**
- * Anthropic提供商类
+ * DeepSeek提供商类
  * 
- * 提供与Anthropic API的集成
+ * 提供与DeepSeek API的集成
  */
-export class AnthropicProvider extends BaseLLMProvider {
+export class DeepSeekProvider extends BaseLLMProvider {
   /**
    * 构造函数
    */
   constructor() {
-    super(LLMProviderType.ANTHROPIC, 'Anthropic');
+    super(LLMProviderType.DEEPSEEK, 'DeepSeek');
     
     // 设置默认模型和可用模型
-    this._defaultModel = 'claude-3-opus-20240229';
+    this._defaultModel = 'deepseek-chat';
     this._models = [
-      'claude-3-opus-20240229',
-      'claude-3-sonnet-20240229',
-      'claude-3-haiku-20240307',
-      'claude-2.1',
-      'claude-2.0',
-      'claude-instant-1.2'
+      'deepseek-chat',
+      'deepseek-coder',
+      'deepseek-llm-67b-chat',
+      'deepseek-llm-7b-chat'
     ];
   }
   
@@ -47,12 +45,12 @@ export class AnthropicProvider extends BaseLLMProvider {
     // 验证API密钥
     const apiKey = this.getConfigValue<string>('apiKey');
     if (!apiKey) {
-      throw new Error('Anthropic API密钥未提供');
+      throw new Error('DeepSeek API密钥未提供');
     }
   }
   
   /**
-   * 发送请求到Anthropic
+   * 发送请求到DeepSeek
    * 
    * @param options 请求选项
    * @returns LLM响应
@@ -63,27 +61,17 @@ export class AnthropicProvider extends BaseLLMProvider {
     
     try {
       // 构建请求URL
-      const apiUrl = this.getConfigValue<string>('apiUrl', 'https://api.anthropic.com');
-      const url = `${apiUrl}/v1/messages`;
+      const apiUrl = this.getConfigValue<string>('apiUrl', 'https://api.deepseek.com');
+      const url = `${apiUrl}/v1/chat/completions`;
       
       // 构建请求头
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-        'x-api-key': this.getConfigValue<string>('apiKey'),
-        'anthropic-version': '2023-06-01'
+        'Authorization': `Bearer ${this.getConfigValue<string>('apiKey')}`
       };
       
       // 转换消息格式
       const messages = this.convertMessages(options.messages);
-      
-      // 提取系统消息
-      let systemPrompt = '';
-      for (const message of options.messages) {
-        if (message.role === LLMModelRole.SYSTEM) {
-          systemPrompt = message.content;
-          break;
-        }
-      }
       
       // 构建请求体
       const body: Record<string, any> = {
@@ -95,14 +83,9 @@ export class AnthropicProvider extends BaseLLMProvider {
         stream: false
       };
       
-      // 添加系统提示（如果有）
-      if (systemPrompt) {
-        body.system = systemPrompt;
-      }
-      
       // 添加停止序列（如果有）
       if (options.stop && options.stop.length > 0) {
-        body.stop_sequences = options.stop;
+        body.stop = options.stop;
       }
       
       // 发送请求
@@ -116,7 +99,7 @@ export class AnthropicProvider extends BaseLLMProvider {
       // 检查响应状态
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(`Anthropic API错误: ${errorData.error?.message || response.statusText}`);
+        throw new Error(`DeepSeek API错误: ${errorData.error?.message || response.statusText}`);
       }
       
       // 解析响应
@@ -126,12 +109,12 @@ export class AnthropicProvider extends BaseLLMProvider {
       const llmResponse: LLMResponse = {
         id: data.id,
         model: data.model,
-        content: data.content[0]?.text || '',
-        finishReason: data.stop_reason || 'stop',
+        content: data.choices[0]?.message?.content || '',
+        finishReason: data.choices[0]?.finish_reason || 'stop',
         usage: data.usage ? {
-          promptTokens: data.usage.input_tokens,
-          completionTokens: data.usage.output_tokens,
-          totalTokens: data.usage.input_tokens + data.usage.output_tokens
+          promptTokens: data.usage.prompt_tokens,
+          completionTokens: data.usage.completion_tokens,
+          totalTokens: data.usage.total_tokens
         } : undefined
       };
       
@@ -147,7 +130,7 @@ export class AnthropicProvider extends BaseLLMProvider {
   }
   
   /**
-   * 发送流式请求到Anthropic
+   * 发送流式请求到DeepSeek
    * 
    * @param options 请求选项
    * @param callback 回调函数，用于处理流式响应
@@ -162,28 +145,18 @@ export class AnthropicProvider extends BaseLLMProvider {
     
     try {
       // 构建请求URL
-      const apiUrl = this.getConfigValue<string>('apiUrl', 'https://api.anthropic.com');
-      const url = `${apiUrl}/v1/messages`;
+      const apiUrl = this.getConfigValue<string>('apiUrl', 'https://api.deepseek.com');
+      const url = `${apiUrl}/v1/chat/completions`;
       
       // 构建请求头
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-        'x-api-key': this.getConfigValue<string>('apiKey'),
-        'anthropic-version': '2023-06-01',
+        'Authorization': `Bearer ${this.getConfigValue<string>('apiKey')}`,
         'Accept': 'text/event-stream'
       };
       
       // 转换消息格式
       const messages = this.convertMessages(options.messages);
-      
-      // 提取系统消息
-      let systemPrompt = '';
-      for (const message of options.messages) {
-        if (message.role === LLMModelRole.SYSTEM) {
-          systemPrompt = message.content;
-          break;
-        }
-      }
       
       // 构建请求体
       const body: Record<string, any> = {
@@ -195,14 +168,9 @@ export class AnthropicProvider extends BaseLLMProvider {
         stream: true
       };
       
-      // 添加系统提示（如果有）
-      if (systemPrompt) {
-        body.system = systemPrompt;
-      }
-      
       // 添加停止序列（如果有）
       if (options.stop && options.stop.length > 0) {
-        body.stop_sequences = options.stop;
+        body.stop = options.stop;
       }
       
       // 发送请求
@@ -216,7 +184,7 @@ export class AnthropicProvider extends BaseLLMProvider {
       // 检查响应状态
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(`Anthropic API错误: ${errorData.error?.message || response.statusText}`);
+        throw new Error(`DeepSeek API错误: ${errorData.error?.message || response.statusText}`);
       }
       
       // 处理流式响应
@@ -273,8 +241,8 @@ export class AnthropicProvider extends BaseLLMProvider {
                   const json = JSON.parse(data);
                   
                   // 保存响应ID和模型
-                  if (json.message?.id && !responseId) {
-                    responseId = json.message.id;
+                  if (json.id && !responseId) {
+                    responseId = json.id;
                   }
                   
                   if (json.model && !model) {
@@ -282,8 +250,8 @@ export class AnthropicProvider extends BaseLLMProvider {
                   }
                   
                   // 处理内容增量
-                  if (json.type === 'content_block_delta' && json.delta?.text) {
-                    content += json.delta.text;
+                  if (json.choices && json.choices[0]?.delta?.content) {
+                    content += json.choices[0].delta.content;
                     
                     // 调用回调
                     callback({
@@ -295,12 +263,12 @@ export class AnthropicProvider extends BaseLLMProvider {
                   }
                   
                   // 检查是否完成
-                  if (json.type === 'message_stop') {
+                  if (json.choices && json.choices[0]?.finish_reason) {
                     callback({
                       id: responseId,
                       model,
                       content,
-                      finishReason: json.stop_reason || 'stop'
+                      finishReason: json.choices[0].finish_reason
                     }, true);
                     return;
                   }
@@ -348,7 +316,7 @@ export class AnthropicProvider extends BaseLLMProvider {
    * @returns 模型列表
    */
   public async listModels(): Promise<string[]> {
-    // Anthropic API目前不提供模型列表端点
+    // DeepSeek API目前不提供模型列表端点
     return this._models;
   }
   
@@ -363,29 +331,24 @@ export class AnthropicProvider extends BaseLLMProvider {
     // 简单估算：每个单词约1.3个令牌
     const words = text.split(/\s+/).length;
     return Math.ceil(words * 1.3);
-    
-    // 注意：实际应用中应该使用anthropic的tokenizer库进行更准确的计算
-    // 这里使用简单估算是为了避免引入额外依赖
   }
   
   /**
    * 转换消息格式
    * 
    * @param messages LLM消息数组
-   * @returns Anthropic格式的消息数组
+   * @returns DeepSeek格式的消息数组
    */
   private convertMessages(messages: LLMMessage[]): any[] {
     const result: any[] = [];
     
     for (const message of messages) {
-      // 跳过系统消息，因为Anthropic使用单独的system参数
-      if (message.role === LLMModelRole.SYSTEM) {
-        continue;
-      }
+      let role = 'user';
       
       // 转换角色
-      let role = 'user';
-      if (message.role === LLMModelRole.ASSISTANT) {
+      if (message.role === LLMModelRole.SYSTEM) {
+        role = 'system';
+      } else if (message.role === LLMModelRole.ASSISTANT) {
         role = 'assistant';
       }
       
@@ -398,4 +361,4 @@ export class AnthropicProvider extends BaseLLMProvider {
     
     return result;
   }
-} 
+}
