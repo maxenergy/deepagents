@@ -55,7 +55,13 @@
         "deepagents.llmProvider": {
           "type": "string",
           "default": "openai",
-          "enum": ["openai", "anthropic", "deepseek", "gemini", "local"],
+          "enum": [
+            "openai",
+            "anthropic",
+            "deepseek",
+            "gemini",
+            "local"
+          ],
           "enumDescriptions": [
             "OpenAI (GPT-4, GPT-3.5)",
             "Anthropic (Claude)",
@@ -73,7 +79,13 @@
         "deepagents.workflowTemplate": {
           "type": "string",
           "default": "default",
-          "enum": ["default", "frontend", "backend", "fullstack", "custom"],
+          "enum": [
+            "default",
+            "frontend",
+            "backend",
+            "fullstack",
+            "custom"
+          ],
           "enumDescriptions": [
             "默认工作流",
             "前端开发工作流",
@@ -123,5 +135,19 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "sqlite3": "^5.1.6"
-  }
+  },
+  "directories": {
+    "doc": "docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maxenergy/deepagents.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/maxenergy/deepagents/issues"
+  },
+  "homepage": "https://github.com/maxenergy/deepagents#readme"
 }

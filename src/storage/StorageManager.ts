@@ -6,11 +6,12 @@ import * as fs from 'fs';
  * 存储命名空间枚举
  */
 export enum StorageNamespace {
+  SETTINGS = 'settings',
   AGENTS = 'agents',
   WORKFLOWS = 'workflows',
   PROJECTS = 'projects',
-  SETTINGS = 'settings',
-  HISTORY = 'history'
+  HISTORY = 'history',
+  LLM = 'llm'
 }
 
 /**

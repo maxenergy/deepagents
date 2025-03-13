@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 import { LLMManager } from '../llm/LLMManager';
 import { StorageManager, StorageNamespace } from '../storage/StorageManager';
 import { ToolManager } from '../tools/ToolManager';
+import { ProductManagerAgent } from './ProductManagerAgent';
+import { ArchitectAgent } from './ArchitectAgent';
+import { DeveloperAgent } from './DeveloperAgent';
+import { TesterAgent } from './TesterAgent';
 
 /**
  * 代理角色枚举
@@ -185,42 +189,61 @@ export class AgentManager {
    * @returns 代理实例
    */
   public async createAgent(role: AgentRole, config: AgentConfig): Promise<IAgent> {
-    // 这里将在后续实现具体的代理类
-    // 目前只是占位符
-    console.log(`创建代理: ${role}`);
+    const id = `agent_${Date.now()}`;
+    let agent: IAgent;
     
-    // 创建一个基本的代理实例
-    const agent: IAgent = {
-      id: `agent_${Date.now()}`,
-      name: config.name,
-      role: config.role,
-      capabilities: config.capabilities,
-      state: AgentState.IDLE,
+    // 根据角色创建不同类型的代理
+    switch (role) {
+      case AgentRole.PRODUCT_MANAGER:
+        agent = new ProductManagerAgent(id, this.llmManager);
+        break;
       
-      async initialize(config: AgentConfig): Promise<void> {
-        console.log(`初始化代理: ${this.name}`);
-      },
+      case AgentRole.ARCHITECT:
+        agent = new ArchitectAgent(id, this.llmManager);
+        break;
       
-      async process(input: AgentInput): Promise<AgentOutput> {
-        console.log(`处理输入: ${input.message}`);
-        return {
-          message: `代理 ${this.name} 收到消息: ${input.message}`,
-          state: this.state
+      case AgentRole.DEVELOPER:
+        agent = new DeveloperAgent(id, this.llmManager, this.toolManager);
+        break;
+      
+      case AgentRole.TESTER:
+        agent = new TesterAgent(id, this.llmManager, this.toolManager);
+        break;
+      
+      default:
+        // 创建一个基本的代理实例
+        agent = {
+          id,
+          name: config.name,
+          role: config.role,
+          capabilities: config.capabilities,
+          state: AgentState.IDLE,
+          
+          async initialize(config: AgentConfig): Promise<void> {
+            console.log(`初始化代理: ${this.name}`);
+          },
+          
+          async process(input: AgentInput): Promise<AgentOutput> {
+            console.log(`处理输入: ${input.message}`);
+            return {
+              message: `代理 ${this.name} 收到消息: ${input.message}`,
+              state: this.state
+            };
+          },
+          
+          async collaborate(agents: IAgent[]): Promise<void> {
+            console.log(`与 ${agents.length} 个代理协作`);
+          },
+          
+          getState(): AgentState {
+            return this.state;
+          },
+          
+          setState(state: AgentState): void {
+            this.state = state;
+          }
         };
-      },
-      
-      async collaborate(agents: IAgent[]): Promise<void> {
-        console.log(`与 ${agents.length} 个代理协作`);
-      },
-      
-      getState(): AgentState {
-        return this.state;
-      },
-      
-      setState(state: AgentState): void {
-        this.state = state;
-      }
-    };
+    }
     
     // 初始化代理
     await agent.initialize(config);

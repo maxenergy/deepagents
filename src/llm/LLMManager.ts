@@ -1,15 +1,19 @@
 import * as vscode from 'vscode';
+import { ILLMProvider, LLMProviderConfig, LLMRequest, LLMResponse } from './ILLMProvider';
+import { OpenAIProvider, OpenAIConfig } from './providers/OpenAIProvider';
+import { AnthropicProvider, AnthropicConfig } from './providers/AnthropicProvider';
 import { StorageManager, StorageNamespace } from '../storage/StorageManager';
 
 /**
- * LLM 提供商枚举
+ * LLM提供商类型
  */
-export enum LLMProvider {
+export enum LLMProviderType {
   OPENAI = 'openai',
   ANTHROPIC = 'anthropic',
-  DEEPSEEK = 'deepseek',
+  AZURE_OPENAI = 'azure_openai',
   GEMINI = 'gemini',
-  LOCAL = 'local'
+  OLLAMA = 'ollama',
+  CUSTOM = 'custom'
 }
 
 /**
@@ -46,35 +50,20 @@ export interface LLMResponseChunk {
 }
 
 /**
- * LLM 提供商接口
- */
-export interface ILLMProvider {
-  id: string;
-  name: string;
-  models: string[];
-  
-  initialize(config: any): Promise<void>;
-  query(prompt: string, options: QueryOptions): Promise<LLMResponse>;
-  streamQuery(prompt: string, options: QueryOptions): AsyncIterator<LLMResponseChunk>;
-  getModels(): string[];
-  estimateTokens(text: string): number;
-}
-
-/**
- * LLM 管理器类
+ * LLM管理器类
  * 
- * 负责管理 LLM 提供商和处理查询
+ * 负责管理和协调不同的LLM提供商，处理LLM请求和响应
  */
 export class LLMManager {
   private context: vscode.ExtensionContext;
   private storageManager: StorageManager;
   private providers: Map<string, ILLMProvider> = new Map();
-  private defaultProviderId: string = LLMProvider.OPENAI;
-
+  private defaultProvider: string | null = null;
+  
   /**
    * 构造函数
    * 
-   * @param context VSCode 扩展上下文
+   * @param context VSCode扩展上下文
    * @param storageManager 存储管理器
    */
   constructor(context: vscode.ExtensionContext, storageManager: StorageManager) {
@@ -82,91 +71,219 @@ export class LLMManager {
     this.storageManager = storageManager;
     this.initialize();
   }
-
+  
   /**
-   * 初始化 LLM 管理器
+   * 初始化LLM管理器
    */
   private async initialize(): Promise<void> {
-    // 加载配置
-    const settings = this.storageManager.getStorage(StorageNamespace.SETTINGS);
-    if (settings) {
-      const defaultProvider = await settings.get<string>('defaultLLMProvider');
-      if (defaultProvider) {
-        this.defaultProviderId = defaultProvider;
+    // 从存储中加载配置
+    const llmStorage = this.storageManager.getStorage(StorageNamespace.LLM);
+    if (llmStorage) {
+      const configs = await llmStorage.getAll();
+      
+      // 加载默认提供商
+      const defaultProviderKey = await llmStorage.get('defaultProvider');
+      if (defaultProviderKey) {
+        this.defaultProvider = defaultProviderKey as string;
+      }
+      
+      // 初始化提供商
+      for (const [key, config] of configs.entries()) {
+        if (key === 'defaultProvider') continue;
+        
+        await this.registerProvider(key, config as LLMProviderConfig);
+      }
+      
+      // 如果没有提供商，注册默认的OpenAI提供商
+      if (this.providers.size === 0) {
+        const openaiConfig: OpenAIConfig = {
+          apiKey: process.env.OPENAI_API_KEY || '',
+          model: 'gpt-4o'
+        };
+        
+        await this.registerProvider(LLMProviderType.OPENAI, openaiConfig);
+        this.defaultProvider = LLMProviderType.OPENAI;
       }
     }
-
-    // 注册默认提供商
-    this.registerDefaultProviders();
   }
-
+  
   /**
-   * 注册默认提供商
-   */
-  private registerDefaultProviders(): void {
-    // 这里将在后续实现具体的提供商
-    // 目前只是占位符
-    console.log('注册默认 LLM 提供商');
-  }
-
-  /**
-   * 注册提供商
+   * 注册LLM提供商
    * 
-   * @param provider LLM 提供商
+   * @param key 提供商键
+   * @param config 提供商配置
    */
-  public registerProvider(provider: ILLMProvider): void {
-    this.providers.set(provider.id, provider);
-  }
-
-  /**
-   * 获取提供商
-   * 
-   * @param id 提供商 ID
-   * @returns LLM 提供商，如果不存在则返回 null
-   */
-  public getProvider(id: string): ILLMProvider | null {
-    return this.providers.get(id) || null;
-  }
-
-  /**
-   * 获取所有提供商
-   * 
-   * @returns 所有 LLM 提供商
-   */
-  public getAllProviders(): ILLMProvider[] {
-    return Array.from(this.providers.values());
-  }
-
-  /**
-   * 设置默认提供商
-   * 
-   * @param id 提供商 ID
-   */
-  public async setDefaultProvider(id: string): Promise<void> {
-    if (this.providers.has(id)) {
-      this.defaultProviderId = id;
+  public async registerProvider(key: string, config: LLMProviderConfig): Promise<void> {
+    let provider: ILLMProvider | null = null;
+    
+    // 根据类型创建不同的提供商
+    switch (key) {
+      case LLMProviderType.OPENAI:
+        provider = new OpenAIProvider(config as OpenAIConfig);
+        break;
+        
+      case LLMProviderType.ANTHROPIC:
+        provider = new AnthropicProvider(config as AnthropicConfig);
+        break;
+        
+      // 其他提供商将在后续实现
       
-      // 保存设置
-      const settings = this.storageManager.getStorage(StorageNamespace.SETTINGS);
-      if (settings) {
-        await settings.set('defaultLLMProvider', id);
+      default:
+        console.warn(`未知的LLM提供商类型: ${key}`);
+        return;
+    }
+    
+    if (provider) {
+      this.providers.set(key, provider);
+      
+      // 保存配置到存储
+      const llmStorage = this.storageManager.getStorage(StorageNamespace.LLM);
+      if (llmStorage) {
+        await llmStorage.set(key, config);
+      }
+      
+      // 如果没有默认提供商，设置为默认
+      if (!this.defaultProvider) {
+        this.defaultProvider = key;
+        
+        // 保存默认提供商到存储
+        if (llmStorage) {
+          await llmStorage.set('defaultProvider', key);
+        }
+      }
+    }
+  }
+  
+  /**
+   * 获取LLM提供商
+   * 
+   * @param key 提供商键，如果为空则返回默认提供商
+   * @returns LLM提供商
+   */
+  public getProvider(key?: string): ILLMProvider | null {
+    if (key) {
+      return this.providers.get(key) || null;
+    }
+    
+    if (this.defaultProvider) {
+      return this.providers.get(this.defaultProvider) || null;
+    }
+    
+    return null;
+  }
+  
+  /**
+   * 设置默认LLM提供商
+   * 
+   * @param key 提供商键
+   */
+  public async setDefaultProvider(key: string): Promise<void> {
+    if (this.providers.has(key)) {
+      this.defaultProvider = key;
+      
+      // 保存默认提供商到存储
+      const llmStorage = this.storageManager.getStorage(StorageNamespace.LLM);
+      if (llmStorage) {
+        await llmStorage.set('defaultProvider', key);
       }
     } else {
-      throw new Error(`提供商 ${id} 不存在`);
+      throw new Error(`LLM提供商不存在: ${key}`);
     }
   }
-
+  
   /**
-   * 获取默认提供商
+   * 发送LLM请求
    * 
-   * @returns 默认 LLM 提供商
+   * @param request LLM请求
+   * @param providerKey 提供商键，如果为空则使用默认提供商
+   * @returns LLM响应
    */
-  public getDefaultProvider(): ILLMProvider {
-    const provider = this.providers.get(this.defaultProviderId);
+  public async sendRequest(request: LLMRequest, providerKey?: string): Promise<LLMResponse> {
+    const provider = this.getProvider(providerKey);
+    
     if (!provider) {
-      throw new Error(`默认提供商 ${this.defaultProviderId} 不存在`);
+      throw new Error('没有可用的LLM提供商');
     }
-    return provider;
+    
+    return await provider.sendRequest(request);
+  }
+  
+  /**
+   * 获取所有LLM提供商
+   * 
+   * @returns LLM提供商映射
+   */
+  public getAllProviders(): Map<string, ILLMProvider> {
+    return this.providers;
+  }
+  
+  /**
+   * 获取默认LLM提供商键
+   * 
+   * @returns 默认提供商键
+   */
+  public getDefaultProviderKey(): string | null {
+    return this.defaultProvider;
+  }
+  
+  /**
+   * 更新LLM提供商配置
+   * 
+   * @param key 提供商键
+   * @param config 提供商配置
+   */
+  public async updateProviderConfig(key: string, config: Partial<LLMProviderConfig>): Promise<void> {
+    const provider = this.getProvider(key);
+    
+    if (!provider) {
+      throw new Error(`LLM提供商不存在: ${key}`);
+    }
+    
+    // 更新提供商配置
+    provider.updateConfig(config);
+    
+    // 保存配置到存储
+    const llmStorage = this.storageManager.getStorage(StorageNamespace.LLM);
+    if (llmStorage) {
+      const fullConfig = provider.getConfig();
+      await llmStorage.set(key, fullConfig);
+    }
+  }
+  
+  /**
+   * 删除LLM提供商
+   * 
+   * @param key 提供商键
+   */
+  public async removeProvider(key: string): Promise<void> {
+    if (this.providers.has(key)) {
+      this.providers.delete(key);
+      
+      // 从存储中删除
+      const llmStorage = this.storageManager.getStorage(StorageNamespace.LLM);
+      if (llmStorage) {
+        await llmStorage.delete(key);
+      }
+      
+      // 如果删除的是默认提供商，重新设置默认提供商
+      if (this.defaultProvider === key) {
+        if (this.providers.size > 0) {
+          this.defaultProvider = Array.from(this.providers.keys())[0];
+          
+          // 保存默认提供商到存储
+          if (llmStorage) {
+            await llmStorage.set('defaultProvider', this.defaultProvider);
+          }
+        } else {
+          this.defaultProvider = null;
+          
+          // 从存储中删除默认提供商
+          if (llmStorage) {
+            await llmStorage.delete('defaultProvider');
+          }
+        }
+      }
+    }
   }
 
   /**
