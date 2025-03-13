@@ -1,0 +1,127 @@
+{
+  "name": "deepagents",
+  "displayName": "DeepAgents",
+  "description": "多代理自动化开发工具",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "deepagents.start",
+        "title": "DeepAgents: 启动多代理开发助手"
+      },
+      {
+        "command": "deepagents.showPanel",
+        "title": "DeepAgents: 显示面板"
+      },
+      {
+        "command": "deepagents.configure",
+        "title": "DeepAgents: 配置设置"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "deepagents-sidebar",
+          "title": "DeepAgents",
+          "icon": "assets/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "deepagents-sidebar": [
+        {
+          "type": "webview",
+          "id": "deepagents.agentsView",
+          "name": "代理管理"
+        },
+        {
+          "type": "webview",
+          "id": "deepagents.workflowView",
+          "name": "工作流"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DeepAgents",
+      "properties": {
+        "deepagents.llmProvider": {
+          "type": "string",
+          "default": "openai",
+          "enum": ["openai", "anthropic", "deepseek", "gemini", "local"],
+          "enumDescriptions": [
+            "OpenAI (GPT-4, GPT-3.5)",
+            "Anthropic (Claude)",
+            "DeepSeek",
+            "Google Gemini",
+            "本地模型 (Qwen)"
+          ],
+          "description": "选择大型语言模型提供商"
+        },
+        "deepagents.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "LLM API密钥"
+        },
+        "deepagents.workflowTemplate": {
+          "type": "string",
+          "default": "default",
+          "enum": ["default", "frontend", "backend", "fullstack", "custom"],
+          "enumDescriptions": [
+            "默认工作流",
+            "前端开发工作流",
+            "后端开发工作流",
+            "全栈开发工作流",
+            "自定义工作流"
+          ],
+          "description": "选择工作流模板"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "16.x",
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^5.59.1",
+    "@typescript-eslint/parser": "^5.59.1",
+    "@vscode/test-electron": "^2.3.0",
+    "css-loader": "^6.8.1",
+    "eslint": "^8.39.0",
+    "glob": "^8.1.0",
+    "mocha": "^10.2.0",
+    "style-loader": "^3.3.3",
+    "ts-loader": "^9.4.2",
+    "typescript": "^5.0.4",
+    "webpack": "^5.81.0",
+    "webpack-cli": "^5.0.2"
+  },
+  "dependencies": {
+    "@vscode/webview-ui-toolkit": "^1.2.2",
+    "axios": "^1.4.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "sqlite3": "^5.1.6"
+  }
+}
