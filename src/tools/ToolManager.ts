@@ -1,271 +1,185 @@
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
+import { ITool, ToolType } from "./ITool";
+import { BaseTool } from "./BaseTool";
+import { CodeAnalysisTool } from "./codeAnalysis/CodeAnalysisTool";
+import { GitTool } from "./versionControl/GitTool";
 
 /**
- * 工具能力枚举
- */
-export enum ToolCapability {
-  CODE_ANALYSIS = 'code_analysis',
-  CODE_GENERATION = 'code_generation',
-  VERSION_CONTROL = 'version_control',
-  TESTING = 'testing',
-  BUILDING = 'building',
-  DOCUMENTATION = 'documentation',
-  BROWSER_AUTOMATION = 'browser_automation'
-}
-
-/**
- * 工具配置接口
- */
-export interface ToolConfig {
-  name: string;
-  description: string;
-  capabilities: ToolCapability[];
-  settings?: any;
-}
-
-/**
- * 工具结果接口
- */
-export interface ToolResult {
-  success: boolean;
-  data?: any;
-  error?: string;
-}
-
-/**
- * 工具接口
- */
-export interface ITool {
-  id: string;
-  name: string;
-  description: string;
-  
-  initialize(config: ToolConfig): Promise<void>;
-  execute(params: any): Promise<ToolResult>;
-  getCapabilities(): ToolCapability[];
-}
-
-/**
- * 工具管理器类
- * 
- * 负责注册和管理工具，执行工具操作
+ * 工具管理器类，负责管理所有工具的注册、获取和执行
  */
 export class ToolManager {
-  private context: vscode.ExtensionContext;
-  private outputChannel: vscode.OutputChannel;
-  private tools: Map<string, ITool> = new Map();
+    private static _instance: ToolManager;
+    private _tools: Map<string, ITool>;
+    private _disposables: vscode.Disposable[];
 
-  /**
-   * 构造函数
-   * 
-   * @param context VSCode 扩展上下文
-   * @param outputChannel 输出通道
-   */
-  constructor(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
-    this.context = context;
-    this.outputChannel = outputChannel;
-    this.initialize();
-  }
-
-  /**
-   * 初始化工具管理器
-   */
-  private initialize(): void {
-    this.outputChannel.appendLine('初始化工具管理器');
-    this.registerDefaultTools();
-  }
-
-  /**
-   * 注册默认工具
-   */
-  private registerDefaultTools(): void {
-    // 这里将在后续实现具体的工具
-    // 目前只是占位符
-    this.outputChannel.appendLine('注册默认工具');
-  }
-
-  /**
-   * 注册工具
-   * 
-   * @param tool 工具
-   */
-  public registerTool(tool: ITool): void {
-    this.tools.set(tool.id, tool);
-    this.outputChannel.appendLine(`注册工具: ${tool.name} (${tool.id})`);
-  }
-
-  /**
-   * 获取工具
-   * 
-   * @param id 工具 ID
-   * @returns 工具，如果不存在则返回 null
-   */
-  public getTool(id: string): ITool | null {
-    return this.tools.get(id) || null;
-  }
-
-  /**
-   * 获取所有工具
-   * 
-   * @returns 所有工具
-   */
-  public getAllTools(): ITool[] {
-    return Array.from(this.tools.values());
-  }
-
-  /**
-   * 执行工具
-   * 
-   * @param id 工具 ID
-   * @param params 参数
-   * @returns 工具结果
-   */
-  public async executeTool(id: string, params: any): Promise<ToolResult> {
-    const tool = this.getTool(id);
-    
-    if (!tool) {
-      return {
-        success: false,
-        error: `工具 ${id} 不存在`
-      };
+    private constructor() {
+        this._tools = new Map<string, ITool>();
+        this._disposables = [];
+        this._registerDefaultTools();
     }
-    
-    try {
-      this.outputChannel.appendLine(`执行工具: ${tool.name} (${tool.id})`);
-      const result = await tool.execute(params);
-      
-      if (result.success) {
-        this.outputChannel.appendLine(`工具执行成功: ${tool.name}`);
-      } else {
-        this.outputChannel.appendLine(`工具执行失败: ${tool.name} - ${result.error}`);
-      }
-      
-      return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.outputChannel.appendLine(`工具执行异常: ${tool.name} - ${errorMessage}`);
-      
-      return {
-        success: false,
-        error: errorMessage
-      };
+
+    /**
+     * 获取工具管理器实例（单例模式）
+     */
+    public static getInstance(): ToolManager {
+        if (!ToolManager._instance) {
+            ToolManager._instance = new ToolManager();
+        }
+        return ToolManager._instance;
     }
-  }
 
-  /**
-   * 创建代码分析工具
-   * 
-   * @returns 代码分析工具
-   */
-  public createCodeAnalysisTool(): ITool {
-    const tool: ITool = {
-      id: 'code_analysis',
-      name: '代码分析',
-      description: '分析代码结构和质量',
-      
-      async initialize(config: ToolConfig): Promise<void> {
-        console.log('初始化代码分析工具');
-      },
-      
-      async execute(params: any): Promise<ToolResult> {
-        console.log('执行代码分析');
+    /**
+     * 注册默认工具
+     */
+    private _registerDefaultTools(): void {
+        // 注册代码分析工具
+        this.registerTool(new CodeAnalysisTool());
         
-        // 这里将在后续实现具体的代码分析逻辑
-        // 目前只是返回一个示例结果
-        return {
-          success: true,
-          data: {
-            fileCount: 10,
-            lineCount: 1000,
-            issues: []
-          }
-        };
-      },
-      
-      getCapabilities(): ToolCapability[] {
-        return [ToolCapability.CODE_ANALYSIS];
-      }
-    };
-    
-    this.registerTool(tool);
-    return tool;
-  }
+        // 注册版本控制工具
+        this.registerTool(new GitTool());
+        
+        // 可以在这里注册更多默认工具
+    }
 
-  /**
-   * 创建版本控制工具
-   * 
-   * @returns 版本控制工具
-   */
-  public createVersionControlTool(): ITool {
-    const tool: ITool = {
-      id: 'version_control',
-      name: '版本控制',
-      description: '管理代码版本和变更',
-      
-      async initialize(config: ToolConfig): Promise<void> {
-        console.log('初始化版本控制工具');
-      },
-      
-      async execute(params: any): Promise<ToolResult> {
-        console.log('执行版本控制操作');
-        
-        // 这里将在后续实现具体的版本控制逻辑
-        // 目前只是返回一个示例结果
-        return {
-          success: true,
-          data: {
-            operation: params.operation,
-            result: 'success'
-          }
-        };
-      },
-      
-      getCapabilities(): ToolCapability[] {
-        return [ToolCapability.VERSION_CONTROL];
-      }
-    };
-    
-    this.registerTool(tool);
-    return tool;
-  }
+    /**
+     * 注册工具
+     * @param tool 要注册的工具
+     * @returns 是否注册成功
+     */
+    public registerTool(tool: ITool): boolean {
+        if (this._tools.has(tool.name)) {
+            console.warn(`Tool with name ${tool.name} already exists. Skipping registration.`);
+            return false;
+        }
 
-  /**
-   * 创建测试工具
-   * 
-   * @returns 测试工具
-   */
-  public createTestingTool(): ITool {
-    const tool: ITool = {
-      id: 'testing',
-      name: '测试',
-      description: '执行测试用例',
-      
-      async initialize(config: ToolConfig): Promise<void> {
-        console.log('初始化测试工具');
-      },
-      
-      async execute(params: any): Promise<ToolResult> {
-        console.log('执行测试');
+        this._tools.set(tool.name, tool);
+        console.log(`Tool ${tool.name} registered successfully.`);
+        return true;
+    }
+
+    /**
+     * 注销工具
+     * @param toolName 要注销的工具名称
+     * @returns 是否注销成功
+     */
+    public unregisterTool(toolName: string): boolean {
+        if (!this._tools.has(toolName)) {
+            console.warn(`Tool with name ${toolName} does not exist. Cannot unregister.`);
+            return false;
+        }
+
+        const tool = this._tools.get(toolName);
+        if (tool) {
+            tool.dispose();
+        }
         
-        // 这里将在后续实现具体的测试逻辑
-        // 目前只是返回一个示例结果
-        return {
-          success: true,
-          data: {
-            totalTests: 10,
-            passedTests: 8,
-            failedTests: 2,
-            coverage: 80
-          }
-        };
-      },
-      
-      getCapabilities(): ToolCapability[] {
-        return [ToolCapability.TESTING];
-      }
-    };
-    
-    this.registerTool(tool);
-    return tool;
-  }
+        this._tools.delete(toolName);
+        console.log(`Tool ${toolName} unregistered successfully.`);
+        return true;
+    }
+
+    /**
+     * 获取工具
+     * @param toolName 工具名称
+     * @returns 工具实例或undefined（如果不存在）
+     */
+    public getTool(toolName: string): ITool | undefined {
+        return this._tools.get(toolName);
+    }
+
+    /**
+     * 获取特定类型的所有工具
+     * @param type 工具类型
+     * @returns 指定类型的工具数组
+     */
+    public getToolsByType(type: ToolType): ITool[] {
+        const tools: ITool[] = [];
+        this._tools.forEach(tool => {
+            if (tool.type === type) {
+                tools.push(tool);
+            }
+        });
+        return tools;
+    }
+
+    /**
+     * 获取所有工具
+     * @returns 所有工具的数组
+     */
+    public getAllTools(): ITool[] {
+        return Array.from(this._tools.values());
+    }
+
+    /**
+     * 执行工具
+     * @param toolName 工具名称
+     * @param params 执行参数
+     * @returns 执行结果的Promise
+     */
+    public async executeTool(toolName: string, params: any): Promise<any> {
+        const tool = this.getTool(toolName);
+        if (!tool) {
+            throw new Error(`Tool with name ${toolName} not found.`);
+        }
+
+        if (!tool.enabled) {
+            throw new Error(`Tool ${toolName} is disabled.`);
+        }
+
+        try {
+            return await tool.execute(params);
+        } catch (error) {
+            console.error(`Error executing tool ${toolName}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * 启用工具
+     * @param toolName 工具名称
+     * @returns 是否成功启用
+     */
+    public enableTool(toolName: string): boolean {
+        const tool = this.getTool(toolName);
+        if (!tool) {
+            console.warn(`Tool with name ${toolName} not found. Cannot enable.`);
+            return false;
+        }
+
+        tool.enable();
+        return true;
+    }
+
+    /**
+     * 禁用工具
+     * @param toolName 工具名称
+     * @returns 是否成功禁用
+     */
+    public disableTool(toolName: string): boolean {
+        const tool = this.getTool(toolName);
+        if (!tool) {
+            console.warn(`Tool with name ${toolName} not found. Cannot disable.`);
+            return false;
+        }
+
+        tool.disable();
+        return true;
+    }
+
+    /**
+     * 释放资源
+     */
+    public dispose(): void {
+        // 释放所有工具资源
+        this._tools.forEach(tool => {
+            tool.dispose();
+        });
+        
+        // 清空工具集合
+        this._tools.clear();
+        
+        // 释放所有订阅
+        this._disposables.forEach(d => d.dispose());
+        this._disposables = [];
+    }
 }
