@@ -6,6 +6,7 @@ import { AgentManager } from './agents/AgentManager';
 import { WorkflowEngine } from './workflow/WorkflowEngine';
 import { UIManager } from './ui/UIManager';
 import { ToolManager } from './tools/ToolManager';
+import { LLMService } from './llm/LLMService';
 
 /**
  * DeepAgents 扩展激活函数
@@ -25,38 +26,30 @@ export async function activate(context: vscode.ExtensionContext) {
     const extensionCore = new ExtensionCore(context, outputChannel);
     const storageManager = new StorageManager(context);
     const llmManager = new LLMManager(context, storageManager);
+    const llmService = LLMService.getInstance();
     const toolManager = new ToolManager(context, outputChannel);
     const agentManager = new AgentManager(context, llmManager, storageManager, toolManager);
-    const workflowEngine = new WorkflowEngine(context, agentManager, storageManager);
-    const uiManager = new UIManager(context, agentManager, workflowEngine, llmManager);
+    const workflowEngine = WorkflowEngine.getInstance();
+    const uiManager = new UIManager(context, storageManager, workflowEngine, agentManager, llmService);
 
     // 注册命令
     context.subscriptions.push(
       vscode.commands.registerCommand('deepagents.start', () => {
         outputChannel.appendLine('启动 DeepAgents');
-        uiManager.showMainPanel();
+        uiManager.showComponent('main_panel');
       })
     );
 
     context.subscriptions.push(
       vscode.commands.registerCommand('deepagents.showPanel', () => {
-        uiManager.showMainPanel();
+        uiManager.showComponent('main_panel');
       })
     );
 
     context.subscriptions.push(
       vscode.commands.registerCommand('deepagents.configure', () => {
-        uiManager.showConfigPanel();
+        uiManager.showComponent('config_panel');
       })
-    );
-
-    // 注册视图
-    context.subscriptions.push(
-      vscode.window.registerWebviewViewProvider('deepagents.agentsView', uiManager.getAgentsViewProvider())
-    );
-
-    context.subscriptions.push(
-      vscode.window.registerWebviewViewProvider('deepagents.workflowView', uiManager.getWorkflowViewProvider())
     );
 
     // 初始化完成
@@ -68,6 +61,7 @@ export async function activate(context: vscode.ExtensionContext) {
       agentManager,
       workflowEngine,
       llmManager,
+      llmService,
       toolManager,
       uiManager
     };
