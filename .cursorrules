@@ -132,6 +132,7 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
 [X] 实现具体的代理类（开发者）
 [X] 实现具体的 LLM 提供商（OpenAI、Anthropic 等）
 [X] 完善 UI 组件的交互逻辑
+[X] 实现工作流模板和执行功能
 [ ] 测试和优化扩展功能
 [ ] 发布扩展
 
@@ -176,5 +177,12 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
 - 创建 IProject 接口和 ProjectStatus 枚举
 - 实现 ProjectManager 类，提供项目管理功能
 - 修复 StorageManager 的使用方式，正确获取和使用存储实例
+
+已实现工作流模板和执行功能，包括：
+- 创建 WorkflowTemplateFactory 类，用于创建预定义的工作流模板
+- 创建 WorkflowExecutor 类，用于执行工作流
+- 创建 WorkflowCommandHandler 类，用于处理 VSCode 命令
+- 创建 WorkflowEngine 类，作为 WorkflowManager 的包装器，以便与现有代码兼容
+- 更新 extension.ts 文件，将工作流相关的功能集成到扩展中
 
 下一步将进行扩展功能的测试和优化，确保各个组件能够正常工作并提供良好的用户体验。

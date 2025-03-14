@@ -3,6 +3,7 @@ import { WorkflowManager } from './WorkflowManager';
 import { WorkflowExecutor } from './WorkflowExecutor';
 import { WorkflowTemplateFactory } from './WorkflowTemplateFactory';
 import { AgentManager } from '../agents/AgentManager';
+import { WorkflowStatus } from './IWorkflow';
 
 /**
  * 工作流命令处理器类
@@ -145,7 +146,7 @@ export class WorkflowCommandHandler {
     try {
       // 如果未提供工作流 ID，则从列表中选择
       if (!workflowId) {
-        const workflows = await this.workflowManager.getWorkflows();
+        const workflows = await this.workflowManager.getAllWorkflows();
         
         if (workflows.length === 0) {
           vscode.window.showInformationMessage('没有可用的工作流');
@@ -154,8 +155,9 @@ export class WorkflowCommandHandler {
 
         const workflowItems = workflows.map(workflow => ({
           label: workflow.name,
-          description: workflow.config.description,
-          id: workflow.id
+          description: `ID: ${workflow.id}`,
+          detail: `状态: ${workflow.status}`,
+          workflow
         }));
 
         const selectedWorkflow = await vscode.window.showQuickPick(workflowItems, {
@@ -166,11 +168,13 @@ export class WorkflowCommandHandler {
           return;
         }
 
-        workflowId = selectedWorkflow.id;
+        workflowId = selectedWorkflow.workflow.id;
       }
 
       // 执行工作流
       await this.workflowExecutor.executeWorkflow(workflowId);
+      
+      vscode.window.showInformationMessage(`工作流 ${workflowId} 已开始执行`);
     } catch (error) {
       vscode.window.showErrorMessage(`执行工作流失败: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -185,27 +189,29 @@ export class WorkflowCommandHandler {
     try {
       // 如果未提供工作流 ID，则从列表中选择
       if (!workflowId) {
-        const workflows = await this.workflowManager.getWorkflows();
+        const workflows = await this.workflowManager.getAllWorkflows();
         
         if (workflows.length === 0) {
           vscode.window.showInformationMessage('没有可用的工作流');
           return;
         }
 
-        const workflowItems = workflows
-          .filter(workflow => workflow.status === 'RUNNING')
+        // 过滤出正在运行的工作流
+        const runningWorkflows = workflows
+          .filter(workflow => workflow.status === WorkflowStatus.RUNNING)
           .map(workflow => ({
             label: workflow.name,
-            description: workflow.config.description,
-            id: workflow.id
+            description: `ID: ${workflow.id}`,
+            detail: `状态: ${workflow.status}`,
+            workflow
           }));
 
-        if (workflowItems.length === 0) {
+        if (runningWorkflows.length === 0) {
           vscode.window.showInformationMessage('没有正在运行的工作流');
           return;
         }
 
-        const selectedWorkflow = await vscode.window.showQuickPick(workflowItems, {
+        const selectedWorkflow = await vscode.window.showQuickPick(runningWorkflows, {
           placeHolder: '请选择要暂停的工作流'
         });
 
@@ -213,11 +219,13 @@ export class WorkflowCommandHandler {
           return;
         }
 
-        workflowId = selectedWorkflow.id;
+        workflowId = selectedWorkflow.workflow.id;
       }
 
       // 暂停工作流
       await this.workflowExecutor.pauseWorkflow(workflowId);
+      
+      vscode.window.showInformationMessage(`工作流 ${workflowId} 已暂停`);
     } catch (error) {
       vscode.window.showErrorMessage(`暂停工作流失败: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -232,27 +240,29 @@ export class WorkflowCommandHandler {
     try {
       // 如果未提供工作流 ID，则从列表中选择
       if (!workflowId) {
-        const workflows = await this.workflowManager.getWorkflows();
+        const workflows = await this.workflowManager.getAllWorkflows();
         
         if (workflows.length === 0) {
           vscode.window.showInformationMessage('没有可用的工作流');
           return;
         }
 
-        const workflowItems = workflows
-          .filter(workflow => workflow.status === 'RUNNING' || workflow.status === 'PAUSED')
+        // 过滤出正在运行或暂停的工作流
+        const activeWorkflows = workflows
+          .filter(workflow => workflow.status === WorkflowStatus.RUNNING || workflow.status === WorkflowStatus.PAUSED)
           .map(workflow => ({
             label: workflow.name,
-            description: workflow.config.description,
-            id: workflow.id
+            description: `ID: ${workflow.id}`,
+            detail: `状态: ${workflow.status}`,
+            workflow
           }));
 
-        if (workflowItems.length === 0) {
+        if (activeWorkflows.length === 0) {
           vscode.window.showInformationMessage('没有正在运行或暂停的工作流');
           return;
         }
 
-        const selectedWorkflow = await vscode.window.showQuickPick(workflowItems, {
+        const selectedWorkflow = await vscode.window.showQuickPick(activeWorkflows, {
           placeHolder: '请选择要停止的工作流'
         });
 
@@ -260,11 +270,13 @@ export class WorkflowCommandHandler {
           return;
         }
 
-        workflowId = selectedWorkflow.id;
+        workflowId = selectedWorkflow.workflow.id;
       }
 
       // 停止工作流
       await this.workflowExecutor.stopWorkflow(workflowId);
+      
+      vscode.window.showInformationMessage(`工作流 ${workflowId} 已停止`);
     } catch (error) {
       vscode.window.showErrorMessage(`停止工作流失败: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -279,27 +291,29 @@ export class WorkflowCommandHandler {
     try {
       // 如果未提供工作流 ID，则从列表中选择
       if (!workflowId) {
-        const workflows = await this.workflowManager.getWorkflows();
+        const workflows = await this.workflowManager.getAllWorkflows();
         
         if (workflows.length === 0) {
           vscode.window.showInformationMessage('没有可用的工作流');
           return;
         }
 
-        const workflowItems = workflows
-          .filter(workflow => workflow.status === 'ERROR' || workflow.status === 'COMPLETED')
+        // 过滤出错误或已完成的工作流
+        const errorWorkflows = workflows
+          .filter(workflow => workflow.status === WorkflowStatus.ERROR || workflow.status === WorkflowStatus.COMPLETED)
           .map(workflow => ({
             label: workflow.name,
-            description: workflow.config.description,
-            id: workflow.id
+            description: `ID: ${workflow.id}`,
+            detail: `状态: ${workflow.status}`,
+            workflow
           }));
 
-        if (workflowItems.length === 0) {
+        if (errorWorkflows.length === 0) {
           vscode.window.showInformationMessage('没有可重试的工作流');
           return;
         }
 
-        const selectedWorkflow = await vscode.window.showQuickPick(workflowItems, {
+        const selectedWorkflow = await vscode.window.showQuickPick(errorWorkflows, {
           placeHolder: '请选择要重试的工作流'
         });
 
@@ -307,11 +321,13 @@ export class WorkflowCommandHandler {
           return;
         }
 
-        workflowId = selectedWorkflow.id;
+        workflowId = selectedWorkflow.workflow.id;
       }
 
       // 重试工作流
       await this.workflowExecutor.retryWorkflow(workflowId);
+      
+      vscode.window.showInformationMessage(`工作流 ${workflowId} 已重新开始`);
     } catch (error) {
       vscode.window.showErrorMessage(`重试工作流失败: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -326,27 +342,29 @@ export class WorkflowCommandHandler {
     try {
       // 如果未提供工作流 ID，则从列表中选择
       if (!workflowId) {
-        const workflows = await this.workflowManager.getWorkflows();
+        const workflows = await this.workflowManager.getAllWorkflows();
         
         if (workflows.length === 0) {
           vscode.window.showInformationMessage('没有可用的工作流');
           return;
         }
 
-        const workflowItems = workflows
-          .filter(workflow => workflow.status === 'ERROR')
+        // 过滤出错误状态的工作流
+        const errorWorkflows = workflows
+          .filter(workflow => workflow.status === WorkflowStatus.ERROR)
           .map(workflow => ({
             label: workflow.name,
-            description: workflow.config.description,
-            id: workflow.id
+            description: `ID: ${workflow.id}`,
+            detail: `状态: ${workflow.status}`,
+            workflow
           }));
 
-        if (workflowItems.length === 0) {
+        if (errorWorkflows.length === 0) {
           vscode.window.showInformationMessage('没有处于错误状态的工作流');
           return;
         }
 
-        const selectedWorkflow = await vscode.window.showQuickPick(workflowItems, {
+        const selectedWorkflow = await vscode.window.showQuickPick(errorWorkflows, {
           placeHolder: '请选择要重试当前步骤的工作流'
         });
 
@@ -354,11 +372,13 @@ export class WorkflowCommandHandler {
           return;
         }
 
-        workflowId = selectedWorkflow.id;
+        workflowId = selectedWorkflow.workflow.id;
       }
 
       // 重试当前步骤
       await this.workflowExecutor.retryCurrentStep(workflowId);
+      
+      vscode.window.showInformationMessage(`工作流 ${workflowId} 的当前步骤已重试`);
     } catch (error) {
       vscode.window.showErrorMessage(`重试当前步骤失败: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -373,27 +393,29 @@ export class WorkflowCommandHandler {
     try {
       // 如果未提供工作流 ID，则从列表中选择
       if (!workflowId) {
-        const workflows = await this.workflowManager.getWorkflows();
+        const workflows = await this.workflowManager.getAllWorkflows();
         
         if (workflows.length === 0) {
           vscode.window.showInformationMessage('没有可用的工作流');
           return;
         }
 
-        const workflowItems = workflows
-          .filter(workflow => workflow.status === 'ERROR' || workflow.status === 'PAUSED')
+        // 过滤出错误或暂停状态的工作流
+        const errorWorkflows = workflows
+          .filter(workflow => workflow.status === WorkflowStatus.ERROR || workflow.status === WorkflowStatus.PAUSED)
           .map(workflow => ({
             label: workflow.name,
-            description: workflow.config.description,
-            id: workflow.id
+            description: `ID: ${workflow.id}`,
+            detail: `状态: ${workflow.status}`,
+            workflow
           }));
 
-        if (workflowItems.length === 0) {
+        if (errorWorkflows.length === 0) {
           vscode.window.showInformationMessage('没有处于错误或暂停状态的工作流');
           return;
         }
 
-        const selectedWorkflow = await vscode.window.showQuickPick(workflowItems, {
+        const selectedWorkflow = await vscode.window.showQuickPick(errorWorkflows, {
           placeHolder: '请选择要跳过当前步骤的工作流'
         });
 
@@ -401,11 +423,13 @@ export class WorkflowCommandHandler {
           return;
         }
 
-        workflowId = selectedWorkflow.id;
+        workflowId = selectedWorkflow.workflow.id;
       }
 
       // 跳过当前步骤
       await this.workflowExecutor.skipCurrentStep(workflowId);
+      
+      vscode.window.showInformationMessage(`工作流 ${workflowId} 的当前步骤已跳过`);
     } catch (error) {
       vscode.window.showErrorMessage(`跳过当前步骤失败: ${error instanceof Error ? error.message : String(error)}`);
     }
