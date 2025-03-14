@@ -61,6 +61,10 @@ export class ArchitectAgent extends BaseAgent implements IArchitectAgent {
             const technologyStack = await this.recommendTechnologyStack(design.id, constraints);
             
             return {
+                agentId: this.id,
+                timestamp: new Date(),
+                status: 'success',
+                message: `已创建架构设计: ${design.name}`,
                 response: `已创建架构设计: ${design.name}`,
                 actions: [{
                     type: 'architecture_created',
@@ -87,6 +91,10 @@ export class ArchitectAgent extends BaseAgent implements IArchitectAgent {
             const technicalDebt = await this.analyzeTechnicalDebt(designId);
             
             return {
+                agentId: this.id,
+                timestamp: new Date(),
+                status: 'success',
+                message: `架构评估完成，总体得分: ${evaluation.overallScore}`,
                 response: `架构评估完成，总体得分: ${evaluation.overallScore}`,
                 actions: [{
                     type: 'architecture_evaluated',

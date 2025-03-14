@@ -117,12 +117,11 @@ export class TesterAgent implements IAgent {
           temperature: 0.4,
           maxTokens: 2500,
           model: this.model
-        },
-        this.provider
+        }
       );
       
       // 解析响应，提取测试用例和动作
-      const { message, actions } = this.parseResponse(response.text);
+      const { message, actions } = this.parseResponse(response.content);
       
       // 执行动作
       if (actions && actions.length > 0) {
@@ -135,7 +134,7 @@ export class TesterAgent implements IAgent {
       this.state = AgentState.IDLE;
       
       return {
-        message,
+        message: message,
         actions,
         state: this.state
       };
