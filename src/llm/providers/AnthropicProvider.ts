@@ -1,36 +1,50 @@
-import {
-  LLMProviderType,
-  LLMProviderConfig,
+import { v4 as uuidv4 } from 'uuid';
+import { 
+  ILLMProvider, 
+  LLMProviderType, 
+  LLMProviderConfig, 
+  LLMQueryOptions, 
+  LLMResponse, 
   LLMRequestOptions,
-  LLMResponse,
-  LLMModelRole,
-  LLMMessage
+  LLMMessage,
+  LLMModelRole
 } from '../ILLMProvider';
-import { BaseLLMProvider } from '../BaseLLMProvider';
+import * as vscode from 'vscode';
+import axios from 'axios';
+import { encode } from 'gpt-tokenizer';
 
 /**
- * Anthropic提供商配置接口
+ * Anthropic 提供商配置接口
  */
 export interface AnthropicProviderConfig extends LLMProviderConfig {
   apiKey: string;
   apiUrl?: string;
+  defaultModel: string;
+  models: string[];
 }
 
 /**
- * Anthropic提供商类
+ * Anthropic 提供商类
  * 
- * 提供与Anthropic API的集成
+ * 实现与 Anthropic API 的集成
  */
-export class AnthropicProvider extends BaseLLMProvider {
+export class AnthropicProvider implements ILLMProvider {
+  public id: string;
+  public name: string;
+  public models: string[];
+  
+  private apiKey: string;
+  private apiUrl: string;
+  private defaultModel: string;
+  private timeout: number;
+  
   /**
    * 构造函数
    */
   constructor() {
-    super(LLMProviderType.ANTHROPIC, 'Anthropic');
-    
-    // 设置默认模型和可用模型
-    this._defaultModel = 'claude-3-opus-20240229';
-    this._models = [
+    this.id = `anthropic-${uuidv4()}`;
+    this.name = 'Anthropic';
+    this.models = [
       'claude-3-opus-20240229',
       'claude-3-sonnet-20240229',
       'claude-3-haiku-20240307',
@@ -38,364 +52,353 @@ export class AnthropicProvider extends BaseLLMProvider {
       'claude-2.0',
       'claude-instant-1.2'
     ];
+    this.apiKey = '';
+    this.apiUrl = 'https://api.anthropic.com';
+    this.defaultModel = 'claude-3-sonnet-20240229';
+    this.timeout = 60000; // 默认超时时间：60秒
   }
   
   /**
-   * 初始化回调
+   * 初始化 Anthropic 提供商
+   * @param config 配置
    */
-  protected async onInitialize(): Promise<void> {
-    // 验证API密钥
-    const apiKey = this.getConfigValue<string>('apiKey');
-    if (!apiKey) {
-      throw new Error('Anthropic API密钥未提供');
+  public async initialize(config: AnthropicProviderConfig): Promise<void> {
+    if (!config.apiKey) {
+      throw new Error('Anthropic API 密钥不能为空');
+    }
+    
+    this.apiKey = config.apiKey;
+    
+    if (config.apiUrl) {
+      this.apiUrl = config.apiUrl;
+    }
+    
+    if (config.defaultModel) {
+      this.defaultModel = config.defaultModel;
+    }
+    
+    if (config.models && config.models.length > 0) {
+      this.models = config.models;
+    }
+    
+    if (config.timeout) {
+      this.timeout = config.timeout;
+    }
+    
+    // 验证 API 密钥
+    try {
+      await this.validateApiKey();
+      console.log('Anthropic API 密钥验证成功');
+    } catch (error) {
+      console.error('Anthropic API 密钥验证失败:', error);
+      throw new Error(`Anthropic API 密钥验证失败: ${error}`);
     }
   }
   
   /**
-   * 发送请求到Anthropic
-   * 
-   * @param options 请求选项
-   * @returns LLM响应
+   * 查询 Anthropic
+   * @param prompt 提示
+   * @param options 选项
+   * @returns Anthropic 响应
    */
-  public async sendRequest(options: LLMRequestOptions): Promise<LLMResponse> {
-    const requestId = this.generateRequestId();
-    const controller = this.createAbortController(requestId);
+  public async query(prompt: string, options: LLMQueryOptions): Promise<LLMResponse> {
+    const model = options.model || this.defaultModel;
     
-    try {
-      // 构建请求URL
-      const apiUrl = this.getConfigValue<string>('apiUrl', 'https://api.anthropic.com');
-      const url = `${apiUrl}/v1/messages`;
+    const messages: LLMMessage[] = [
+      { role: LLMModelRole.USER, content: prompt }
+    ];
+    
+    const requestOptions: LLMRequestOptions = {
+      model,
+      messages,
+      temperature: options.temperature,
+      maxTokens: options.maxTokens,
+      topP: options.topP,
+      frequencyPenalty: options.frequencyPenalty,
+      presencePenalty: options.presencePenalty,
+      stop: options.stop
+    };
+    
+    return this.sendRequest(requestOptions);
+  }
+  
+  /**
+   * 流式查询 Anthropic
+   * @param prompt 提示
+   * @param options 选项
+   * @returns Anthropic 响应流
+   */
+  public async *streamQuery(prompt: string, options: LLMQueryOptions): AsyncIterator<LLMResponse> {
+    const model = options.model || this.defaultModel;
+    
+    const messages: LLMMessage[] = [
+      { role: LLMModelRole.USER, content: prompt }
+    ];
+    
+    const requestOptions: LLMRequestOptions = {
+      model,
+      messages,
+      temperature: options.temperature,
+      maxTokens: options.maxTokens,
+      topP: options.topP,
+      frequencyPenalty: options.frequencyPenalty,
+      presencePenalty: options.presencePenalty,
+      stop: options.stop,
+      stream: true
+    };
+    
+    const response = await axios({
+      method: 'post',
+      url: `${this.apiUrl}/v1/messages`,
+      headers: this.getHeaders(),
+      data: this.formatRequestData(requestOptions),
+      responseType: 'stream',
+      timeout: this.timeout
+    });
+    
+    const stream = response.data;
+    
+    for await (const chunk of this.parseSSE(stream)) {
+      if (chunk === '[DONE]') {
+        break;
+      }
       
-      // 构建请求头
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'x-api-key': this.getConfigValue<string>('apiKey'),
-        'anthropic-version': '2023-06-01'
-      };
-      
-      // 转换消息格式
-      const messages = this.convertMessages(options.messages);
-      
-      // 提取系统消息
-      let systemPrompt = '';
-      for (const message of options.messages) {
-        if (message.role === LLMModelRole.SYSTEM) {
-          systemPrompt = message.content;
-          break;
+      try {
+        const data = JSON.parse(chunk);
+        
+        if (data.type === 'content_block_delta') {
+          yield {
+            id: data.message_id || uuidv4(),
+            model: model,
+            content: data.delta?.text || '',
+            finishReason: ''
+          };
+        } else if (data.type === 'message_stop') {
+          yield {
+            id: data.message_id || uuidv4(),
+            model: model,
+            content: '',
+            finishReason: data.stop_reason || 'stop'
+          };
         }
+      } catch (error) {
+        console.error('解析 Anthropic 流响应失败:', error);
       }
-      
-      // 构建请求体
-      const body: Record<string, any> = {
-        model: options.model || this._defaultModel,
-        messages,
-        temperature: options.temperature !== undefined ? options.temperature : 0.7,
-        max_tokens: options.maxTokens || 4096,
-        top_p: options.topP,
-        stream: false
-      };
-      
-      // 添加系统提示（如果有）
-      if (systemPrompt) {
-        body.system = systemPrompt;
-      }
-      
-      // 添加停止序列（如果有）
-      if (options.stop && options.stop.length > 0) {
-        body.stop_sequences = options.stop;
-      }
-      
-      // 发送请求
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal: controller.signal
+    }
+  }
+  
+  /**
+   * 获取可用模型
+   * @returns 模型列表
+   */
+  public getModels(): string[] {
+    return this.models;
+  }
+  
+  /**
+   * 估算文本的 token 数量
+   * @param text 文本
+   * @returns token 数量
+   */
+  public estimateTokens(text: string): number {
+    // 使用 GPT tokenizer 作为近似估计
+    // 注意：这不是完全准确的，但可以作为估计
+    return encode(text).length;
+  }
+  
+  /**
+   * 发送请求到 Anthropic API
+   * @param options 请求选项
+   * @returns Anthropic 响应
+   */
+  private async sendRequest(options: LLMRequestOptions): Promise<LLMResponse> {
+    try {
+      const response = await axios({
+        method: 'post',
+        url: `${this.apiUrl}/v1/messages`,
+        headers: this.getHeaders(),
+        data: this.formatRequestData(options),
+        timeout: options.timeout || this.timeout
       });
       
-      // 检查响应状态
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Anthropic API错误: ${errorData.error?.message || response.statusText}`);
-      }
+      const data = response.data;
       
-      // 解析响应
-      const data = await response.json();
-      
-      // 构建响应
-      const llmResponse: LLMResponse = {
+      return {
         id: data.id,
         model: data.model,
-        content: data.content[0]?.text || '',
-        finishReason: data.stop_reason || 'stop',
+        content: data.content && data.content.length > 0 ? 
+          data.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('') : '',
+        finishReason: data.stop_reason || '',
         usage: data.usage ? {
           promptTokens: data.usage.input_tokens,
           completionTokens: data.usage.output_tokens,
           totalTokens: data.usage.input_tokens + data.usage.output_tokens
         } : undefined
       };
-      
-      return llmResponse;
     } catch (error: any) {
-      if (error.name === 'AbortError') {
-        throw new Error('请求已取消');
+      console.error('Anthropic 请求失败:', error);
+      
+      if (error.response) {
+        const { status, data } = error.response;
+        throw new Error(`Anthropic 请求失败 (${status}): ${JSON.stringify(data)}`);
       }
-      throw error;
-    } finally {
-      this.removeAbortController(requestId);
+      
+      throw new Error(`Anthropic 请求失败: ${error.message}`);
     }
   }
   
   /**
-   * 发送流式请求到Anthropic
-   * 
+   * 获取请求头
+   * @returns 请求头
+   */
+  private getHeaders(): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      'x-api-key': this.apiKey,
+      'anthropic-version': '2023-06-01'
+    };
+  }
+  
+  /**
+   * 格式化请求数据
    * @param options 请求选项
-   * @param callback 回调函数，用于处理流式响应
-   * @returns 请求ID
+   * @returns 格式化的请求数据
    */
-  public async sendStreamingRequest(
-    options: LLMRequestOptions,
-    callback: (chunk: Partial<LLMResponse>, done: boolean) => void
-  ): Promise<string> {
-    const requestId = this.generateRequestId();
-    const controller = this.createAbortController(requestId);
+  private formatRequestData(options: LLMRequestOptions): any {
+    // 将 LLM 消息转换为 Anthropic 消息格式
+    const messages = this.convertMessages(options.messages);
     
-    try {
-      // 构建请求URL
-      const apiUrl = this.getConfigValue<string>('apiUrl', 'https://api.anthropic.com');
-      const url = `${apiUrl}/v1/messages`;
-      
-      // 构建请求头
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'x-api-key': this.getConfigValue<string>('apiKey'),
-        'anthropic-version': '2023-06-01',
-        'Accept': 'text/event-stream'
-      };
-      
-      // 转换消息格式
-      const messages = this.convertMessages(options.messages);
-      
-      // 提取系统消息
-      let systemPrompt = '';
-      for (const message of options.messages) {
-        if (message.role === LLMModelRole.SYSTEM) {
-          systemPrompt = message.content;
-          break;
-        }
-      }
-      
-      // 构建请求体
-      const body: Record<string, any> = {
-        model: options.model || this._defaultModel,
-        messages,
-        temperature: options.temperature !== undefined ? options.temperature : 0.7,
-        max_tokens: options.maxTokens || 4096,
-        top_p: options.topP,
-        stream: true
-      };
-      
-      // 添加系统提示（如果有）
-      if (systemPrompt) {
-        body.system = systemPrompt;
-      }
-      
-      // 添加停止序列（如果有）
-      if (options.stop && options.stop.length > 0) {
-        body.stop_sequences = options.stop;
-      }
-      
-      // 发送请求
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal: controller.signal
-      });
-      
-      // 检查响应状态
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Anthropic API错误: ${errorData.error?.message || response.statusText}`);
-      }
-      
-      // 处理流式响应
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('无法获取响应流');
-      }
-      
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-      let responseId = '';
-      let model = '';
-      let content = '';
-      
-      const processChunks = async () => {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            
-            if (done) {
-              // 流结束，调用回调
-              callback({
-                id: responseId,
-                model,
-                content,
-                finishReason: 'stop'
-              }, true);
-              break;
-            }
-            
-            // 解码数据
-            buffer += decoder.decode(value, { stream: true });
-            
-            // 处理数据行
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-            
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6);
-                
-                // 检查是否是流结束标记
-                if (data === '[DONE]') {
-                  callback({
-                    id: responseId,
-                    model,
-                    content,
-                    finishReason: 'stop'
-                  }, true);
-                  return;
-                }
-                
-                try {
-                  const json = JSON.parse(data);
-                  
-                  // 保存响应ID和模型
-                  if (json.message?.id && !responseId) {
-                    responseId = json.message.id;
-                  }
-                  
-                  if (json.model && !model) {
-                    model = json.model;
-                  }
-                  
-                  // 处理内容增量
-                  if (json.type === 'content_block_delta' && json.delta?.text) {
-                    content += json.delta.text;
-                    
-                    // 调用回调
-                    callback({
-                      id: responseId,
-                      model,
-                      content,
-                      finishReason: null
-                    }, false);
-                  }
-                  
-                  // 检查是否完成
-                  if (json.type === 'message_stop') {
-                    callback({
-                      id: responseId,
-                      model,
-                      content,
-                      finishReason: json.stop_reason || 'stop'
-                    }, true);
-                    return;
-                  }
-                } catch (error: any) {
-                  console.error('解析流式响应时出错:', error);
-                }
-              }
-            }
-          }
-        } catch (error: any) {
-          if (error.name === 'AbortError') {
-            callback({
-              id: responseId,
-              model,
-              content,
-              finishReason: 'cancelled'
-            }, true);
-          } else {
-            console.error('处理流式响应时出错:', error);
-            callback({
-              id: responseId,
-              model,
-              content,
-              finishReason: 'error'
-            }, true);
-          }
-        } finally {
-          reader.releaseLock();
-        }
-      };
-      
-      // 开始处理流
-      processChunks();
-      
-      return requestId;
-    } catch (error: any) {
-      this.removeAbortController(requestId);
-      throw error;
+    const data: any = {
+      model: options.model,
+      messages: messages,
+      max_tokens: options.maxTokens || 1024
+    };
+    
+    if (options.temperature !== undefined) {
+      data.temperature = options.temperature;
     }
-  }
-  
-  /**
-   * 获取模型列表
-   * 
-   * @returns 模型列表
-   */
-  public async listModels(): Promise<string[]> {
-    // Anthropic API目前不提供模型列表端点
-    return this._models;
-  }
-  
-  /**
-   * 计算令牌数量
-   * 
-   * @param text 文本
-   * @param model 模型名称
-   * @returns 令牌数量
-   */
-  public async countTokens(text: string, model?: string): Promise<number> {
-    // 简单估算：每个单词约1.3个令牌
-    const words = text.split(/\s+/).length;
-    return Math.ceil(words * 1.3);
     
-    // 注意：实际应用中应该使用anthropic的tokenizer库进行更准确的计算
-    // 这里使用简单估算是为了避免引入额外依赖
+    if (options.topP !== undefined) {
+      data.top_p = options.topP;
+    }
+    
+    if (options.stop !== undefined) {
+      data.stop_sequences = options.stop;
+    }
+    
+    if (options.stream !== undefined) {
+      data.stream = options.stream;
+    }
+    
+    return data;
   }
   
   /**
-   * 转换消息格式
-   * 
-   * @param messages LLM消息数组
-   * @returns Anthropic格式的消息数组
+   * 将 LLM 消息转换为 Anthropic 消息格式
+   * @param messages LLM 消息
+   * @returns Anthropic 消息
    */
   private convertMessages(messages: LLMMessage[]): any[] {
     const result: any[] = [];
+    let systemMessage = '';
     
-    for (const message of messages) {
-      // 跳过系统消息，因为Anthropic使用单独的system参数
-      if (message.role === LLMModelRole.SYSTEM) {
-        continue;
+    // 提取系统消息
+    const systemMsgIndex = messages.findIndex(msg => msg.role === LLMModelRole.SYSTEM);
+    if (systemMsgIndex !== -1) {
+      systemMessage = messages[systemMsgIndex].content;
+      messages = [...messages.slice(0, systemMsgIndex), ...messages.slice(systemMsgIndex + 1)];
+    }
+    
+    // 转换其他消息
+    for (const msg of messages) {
+      if (msg.role === LLMModelRole.USER) {
+        result.push({
+          role: 'user',
+          content: msg.content
+        });
+      } else if (msg.role === LLMModelRole.ASSISTANT) {
+        result.push({
+          role: 'assistant',
+          content: msg.content
+        });
       }
-      
-      // 转换角色
-      let role = 'user';
-      if (message.role === LLMModelRole.ASSISTANT) {
-        role = 'assistant';
-      }
-      
-      // 添加消息
-      result.push({
-        role,
-        content: message.content
-      });
+      // 忽略其他角色的消息
+    }
+    
+    // 添加系统消息（如果有）
+    if (systemMessage) {
+      return [{
+        role: 'system',
+        content: systemMessage
+      }, ...result];
     }
     
     return result;
+  }
+  
+  /**
+   * 验证 API 密钥
+   */
+  private async validateApiKey(): Promise<void> {
+    try {
+      // Anthropic 没有专门的验证端点，所以我们发送一个简单的请求
+      await axios({
+        method: 'post',
+        url: `${this.apiUrl}/v1/messages`,
+        headers: this.getHeaders(),
+        data: {
+          model: this.defaultModel,
+          messages: [{ role: 'user', content: 'Hello' }],
+          max_tokens: 10
+        },
+        timeout: this.timeout
+      });
+    } catch (error: any) {
+      if (error.response && error.response.status === 401) {
+        throw new Error('无效的 API 密钥');
+      }
+      throw error;
+    }
+  }
+  
+  /**
+   * 解析 SSE 流
+   * @param stream 流
+   * @returns 解析后的数据
+   */
+  private async *parseSSE(stream: any): AsyncGenerator<string> {
+    let buffer = '';
+    
+    for await (const chunk of stream) {
+      buffer += chunk.toString();
+      
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        const trimmedLine = line.trim();
+        
+        if (!trimmedLine) {
+          continue;
+        }
+        
+        if (trimmedLine === 'data: [DONE]') {
+          yield '[DONE]';
+          continue;
+        }
+        
+        if (trimmedLine.startsWith('data: ')) {
+          yield trimmedLine.slice(6);
+        }
+      }
+    }
+    
+    if (buffer.trim()) {
+      if (buffer.trim() === 'data: [DONE]') {
+        yield '[DONE]';
+      } else if (buffer.trim().startsWith('data: ')) {
+        yield buffer.trim().slice(6);
+      }
+    }
   }
 } 

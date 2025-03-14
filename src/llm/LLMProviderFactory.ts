@@ -1,30 +1,25 @@
 import { ILLMProvider, LLMProviderType, LLMProviderConfig } from './ILLMProvider';
 import { OpenAIProvider } from './providers/OpenAIProvider';
 import { AnthropicProvider } from './providers/AnthropicProvider';
-import { DeepSeekProvider } from './providers/DeepSeekProvider';
-import { GeminiProvider } from './providers/GeminiProvider';
-import { LocalLLMProvider } from './providers/LocalLLMProvider';
+import * as vscode from 'vscode';
 
 /**
- * LLM提供商工厂类
+ * LLM 提供商工厂类
  * 
- * 负责创建和管理不同的LLM提供商实例
+ * 负责创建和管理不同的 LLM 提供商实例
  */
 export class LLMProviderFactory {
   private static instance: LLMProviderFactory;
-  private providers: Map<LLMProviderType, ILLMProvider>;
+  private providers: Map<string, ILLMProvider> = new Map();
   
   /**
-   * 构造函数
+   * 私有构造函数，防止直接实例化
    */
-  private constructor() {
-    this.providers = new Map<LLMProviderType, ILLMProvider>();
-  }
+  private constructor() {}
   
   /**
-   * 获取工厂实例
-   * 
-   * @returns LLM提供商工厂实例
+   * 获取单例实例
+   * @returns LLM 提供商工厂实例
    */
   public static getInstance(): LLMProviderFactory {
     if (!LLMProviderFactory.instance) {
@@ -34,21 +29,12 @@ export class LLMProviderFactory {
   }
   
   /**
-   * 创建LLM提供商
-   * 
+   * 创建 LLM 提供商
    * @param type 提供商类型
    * @param config 提供商配置
-   * @returns LLM提供商实例
+   * @returns LLM 提供商实例
    */
   public async createProvider(type: LLMProviderType, config: LLMProviderConfig): Promise<ILLMProvider> {
-    // 检查是否已存在该类型的提供商
-    if (this.providers.has(type)) {
-      const provider = this.providers.get(type)!;
-      await provider.initialize(config);
-      return provider;
-    }
-    
-    // 创建新的提供商实例
     let provider: ILLMProvider;
     
     switch (type) {
@@ -58,59 +44,79 @@ export class LLMProviderFactory {
       case LLMProviderType.ANTHROPIC:
         provider = new AnthropicProvider();
         break;
+      case LLMProviderType.AZURE_OPENAI:
+        // TODO: 实现 Azure OpenAI 提供商
+        throw new Error('Azure OpenAI 提供商尚未实现');
       case LLMProviderType.DEEPSEEK:
-        provider = new DeepSeekProvider();
-        break;
+        // TODO: 实现 DeepSeek 提供商
+        throw new Error('DeepSeek 提供商尚未实现');
       case LLMProviderType.GEMINI:
-        provider = new GeminiProvider();
-        break;
+        // TODO: 实现 Gemini 提供商
+        throw new Error('Gemini 提供商尚未实现');
       case LLMProviderType.LOCAL:
-        provider = new LocalLLMProvider();
-        break;
+        // TODO: 实现本地 LLM 提供商
+        throw new Error('本地 LLM 提供商尚未实现');
+      case LLMProviderType.CUSTOM:
+        // TODO: 实现自定义 LLM 提供商
+        throw new Error('自定义 LLM 提供商尚未实现');
       default:
-        throw new Error(`不支持的LLM提供商类型: ${type}`);
+        throw new Error(`不支持的 LLM 提供商类型: ${type}`);
     }
     
-    // 初始化提供商
     await provider.initialize(config);
-    
-    // 存储提供商实例
-    this.providers.set(type, provider);
+    this.providers.set(provider.id, provider);
     
     return provider;
   }
   
   /**
-   * 获取LLM提供商
-   * 
-   * @param type 提供商类型
-   * @returns LLM提供商实例，如果不存在则返回undefined
+   * 获取 LLM 提供商
+   * @param id 提供商 ID
+   * @returns LLM 提供商实例
    */
-  public getProvider(type: LLMProviderType): ILLMProvider | undefined {
-    return this.providers.get(type);
+  public getProvider(id: string): ILLMProvider | undefined {
+    return this.providers.get(id);
   }
   
   /**
-   * 获取所有LLM提供商
-   * 
-   * @returns LLM提供商实例数组
+   * 获取所有 LLM 提供商
+   * @returns LLM 提供商实例列表
    */
   public getAllProviders(): ILLMProvider[] {
     return Array.from(this.providers.values());
   }
   
   /**
-   * 移除LLM提供商
-   * 
+   * 获取指定类型的所有 LLM 提供商
    * @param type 提供商类型
-   * @returns 是否成功移除
+   * @returns LLM 提供商实例列表
    */
-  public removeProvider(type: LLMProviderType): boolean {
-    return this.providers.delete(type);
+  public getProvidersByType(type: LLMProviderType): ILLMProvider[] {
+    return this.getAllProviders().filter(provider => {
+      // 根据提供商的类名判断类型
+      switch (type) {
+        case LLMProviderType.OPENAI:
+          return provider instanceof OpenAIProvider;
+        case LLMProviderType.ANTHROPIC:
+          return provider instanceof AnthropicProvider;
+        // 其他类型的判断将在实现相应提供商后添加
+        default:
+          return false;
+      }
+    });
   }
   
   /**
-   * 清除所有LLM提供商
+   * 移除 LLM 提供商
+   * @param id 提供商 ID
+   * @returns 是否成功移除
+   */
+  public removeProvider(id: string): boolean {
+    return this.providers.delete(id);
+  }
+  
+  /**
+   * 清除所有 LLM 提供商
    */
   public clearProviders(): void {
     this.providers.clear();
