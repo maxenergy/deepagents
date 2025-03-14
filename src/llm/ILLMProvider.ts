@@ -103,81 +103,58 @@ export interface LLMProviderConfig {
 }
 
 /**
+ * LLM查询选项接口
+ */
+export interface LLMQueryOptions {
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  stop?: string[];
+  [key: string]: any;
+}
+
+/**
  * LLM提供商接口
  */
 export interface ILLMProvider {
-  /**
-   * 提供商类型
-   */
-  readonly type: LLMProviderType;
+  id: string;
+  name: string;
+  models: string[];
   
   /**
-   * 提供商名称
+   * 初始化 LLM 提供者
+   * @param config 配置
    */
-  readonly name: string;
+  initialize(config: any): Promise<void>;
   
   /**
-   * 默认模型
+   * 查询 LLM
+   * @param prompt 提示
+   * @param options 选项
+   * @returns LLM 响应
    */
-  readonly defaultModel: string;
+  query(prompt: string, options: LLMQueryOptions): Promise<LLMResponse>;
   
   /**
-   * 可用模型列表
+   * 流式查询 LLM
+   * @param prompt 提示
+   * @param options 选项
+   * @returns LLM 响应流
    */
-  readonly models: string[];
+  streamQuery(prompt: string, options: LLMQueryOptions): AsyncIterator<LLMResponse>;
   
   /**
-   * 初始化提供商
-   * 
-   * @param config 提供商配置
-   */
-  initialize(config: LLMProviderConfig): Promise<void>;
-  
-  /**
-   * 发送请求到LLM
-   * 
-   * @param options 请求选项
-   * @returns LLM响应
-   */
-  sendRequest(options: LLMRequestOptions): Promise<LLMResponse>;
-  
-  /**
-   * 发送流式请求到LLM
-   * 
-   * @param options 请求选项
-   * @param callback 回调函数，用于处理流式响应
-   * @returns 请求ID
-   */
-  sendStreamingRequest(
-    options: LLMRequestOptions,
-    callback: (chunk: Partial<LLMResponse>, done: boolean) => void
-  ): Promise<string>;
-  
-  /**
-   * 取消请求
-   * 
-   * @param requestId 请求ID
-   */
-  cancelRequest(requestId: string): void;
-  
-  /**
-   * 获取模型列表
-   * 
+   * 获取可用模型
    * @returns 模型列表
    */
-  listModels(): Promise<string[]>;
+  getModels(): string[];
   
   /**
-   * 计算令牌数量
-   * 
+   * 估算文本的 token 数量
    * @param text 文本
-   * @param model 模型名称
-   * @returns 令牌数量
+   * @returns token 数量
    */
-  countTokens(text: string, model?: string): Promise<number>;
-  
-  /**
-   * 销毁提供商
-   */
-  dispose(): void;
+  estimateTokens(text: string): number;
 } 
