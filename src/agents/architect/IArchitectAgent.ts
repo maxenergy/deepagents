@@ -1,4 +1,7 @@
 import { AgentConfig, AgentInput, AgentOutput, IAgent } from '../IAgent';
+import { Requirement, UserStory } from '../product/ProductRequirementsAgent';
+import { ArchitectureType, TechStackType, TechChoice, ArchitectureDesign } from './ArchitectAgent';
+import { CollaborationType } from '../collaboration';
 
 /**
  * 架构设计类型枚举
@@ -118,16 +121,14 @@ export interface ArchitectAgentConfig extends AgentConfig {
 /**
  * 架构师代理输入接口
  */
-export interface ArchitectAgentInput extends AgentInput {
-  requirements?: any[];
-  existingArchitecture?: ArchitectureDesign;
-  designConstraints?: string[];
-  preferredTechnologies?: string[];
-  excludedTechnologies?: string[];
-  qualityAttributes?: {
-    name: string;
-    importance: number;
-  }[];
+export interface ArchitectAgentInput {
+  type: 'create_architecture' | 'evaluate_architecture' | 'suggest_tech_stack' | 'analyze_requirements';
+  requirements?: Requirement[];
+  userStories?: UserStory[];
+  projectDescription?: string;
+  architectureType?: ArchitectureType;
+  existingArchitectureId?: string;
+  techStackTypes?: TechStackType[];
 }
 
 /**
@@ -135,25 +136,9 @@ export interface ArchitectAgentInput extends AgentInput {
  */
 export interface ArchitectAgentOutput extends AgentOutput {
   architectureDesign?: ArchitectureDesign;
-  technologyStack?: TechnologyStack;
-  designDecisions?: {
-    id: string;
-    topic: string;
-    options: {
-      name: string;
-      description: string;
-      pros: string[];
-      cons: string[];
-    }[];
-    decision: string;
-    rationale: string;
-  }[];
-  technicalDebt?: {
-    id: string;
-    description: string;
-    impact: 'high' | 'medium' | 'low';
-    remediationStrategy?: string;
-  }[];
+  evaluation?: string;
+  techChoices?: TechChoice[];
+  analysis?: string;
 }
 
 /**
@@ -163,170 +148,94 @@ export interface IArchitectAgent extends IAgent {
   /**
    * 创建架构设计
    * @param requirements 需求列表
-   * @param constraints 约束条件
-   * @returns 架构设计
+   * @param userStories 用户故事列表
+   * @param projectDescription 项目描述
+   * @param architectureType 架构类型（可选）
+   * @returns 创建的架构设计
    */
-  createArchitectureDesign(
-    requirements: any[],
-    constraints?: string[]
+  createArchitecture(
+    requirements: Requirement[],
+    userStories: UserStory[],
+    projectDescription: string,
+    architectureType?: ArchitectureType
   ): Promise<ArchitectureDesign>;
-
-  /**
-   * 更新架构设计
-   * @param designId 设计ID
-   * @param updates 更新内容
-   * @returns 更新后的架构设计
-   */
-  updateArchitectureDesign(
-    designId: string,
-    updates: Partial<ArchitectureDesign>
-  ): Promise<ArchitectureDesign>;
-
-  /**
-   * 添加架构组件
-   * @param designId 设计ID
-   * @param component 组件
-   * @returns 更新后的架构设计
-   */
-  addComponent(
-    designId: string,
-    component: ArchitectureComponent
-  ): Promise<ArchitectureDesign>;
-
-  /**
-   * 更新架构组件
-   * @param designId 设计ID
-   * @param componentId 组件ID
-   * @param updates 更新内容
-   * @returns 更新后的架构设计
-   */
-  updateComponent(
-    designId: string,
-    componentId: string,
-    updates: Partial<ArchitectureComponent>
-  ): Promise<ArchitectureDesign>;
-
-  /**
-   * 删除架构组件
-   * @param designId 设计ID
-   * @param componentId 组件ID
-   * @returns 更新后的架构设计
-   */
-  removeComponent(
-    designId: string,
-    componentId: string
-  ): Promise<ArchitectureDesign>;
-
-  /**
-   * 添加架构关系
-   * @param designId 设计ID
-   * @param relationship 关系
-   * @returns 更新后的架构设计
-   */
-  addRelationship(
-    designId: string,
-    relationship: ArchitectureRelationship
-  ): Promise<ArchitectureDesign>;
-
-  /**
-   * 更新架构关系
-   * @param designId 设计ID
-   * @param relationshipId 关系ID
-   * @param updates 更新内容
-   * @returns 更新后的架构设计
-   */
-  updateRelationship(
-    designId: string,
-    relationshipId: string,
-    updates: Partial<ArchitectureRelationship>
-  ): Promise<ArchitectureDesign>;
-
-  /**
-   * 删除架构关系
-   * @param designId 设计ID
-   * @param relationshipId 关系ID
-   * @returns 更新后的架构设计
-   */
-  removeRelationship(
-    designId: string,
-    relationshipId: string
-  ): Promise<ArchitectureDesign>;
-
+  
   /**
    * 评估架构设计
-   * @param designId 设计ID
-   * @param qualityAttributes 质量属性
+   * @param architectureId 架构设计ID
    * @returns 评估结果
    */
-  evaluateArchitecture(
-    designId: string,
-    qualityAttributes?: string[]
-  ): Promise<{
-    overallScore: number;
-    attributeScores: Record<string, number>;
-    strengths: string[];
-    weaknesses: string[];
-    recommendations: string[];
-  }>;
-
+  evaluateArchitecture(architectureId: string): Promise<string>;
+  
   /**
    * 推荐技术栈
-   * @param designId 设计ID
-   * @param constraints 约束条件
-   * @returns 技术栈
-   */
-  recommendTechnologyStack(
-    designId: string,
-    constraints?: string[]
-  ): Promise<TechnologyStack>;
-
-  /**
-   * 生成架构图
-   * @param designId 设计ID
-   * @param diagramType 图表类型
-   * @returns 架构图
-   */
-  generateArchitectureDiagram(
-    designId: string,
-    diagramType: string
-  ): Promise<{
-    id: string;
-    name: string;
-    type: string;
-    content: string;
-  }>;
-
-  /**
-   * 分析技术债务
-   * @param designId 设计ID
-   * @returns 技术债务列表
-   */
-  analyzeTechnicalDebt(
-    designId: string
-  ): Promise<{
-    id: string;
-    description: string;
-    impact: 'high' | 'medium' | 'low';
-    remediationStrategy?: string;
-  }[]>;
-
-  /**
-   * 验证架构设计
-   * @param designId 设计ID
    * @param requirements 需求列表
-   * @returns 验证结果
+   * @param techStackTypes 技术栈类型列表
+   * @returns 推荐的技术选择列表
    */
-  validateArchitecture(
-    designId: string,
-    requirements: any[]
-  ): Promise<{
-    isValid: boolean;
-    issues: {
-      componentId?: string;
-      relationshipId?: string;
-      description: string;
-      severity: 'critical' | 'major' | 'minor';
-    }[];
-    requirementsCoverage: number;
-  }>;
+  suggestTechStack(
+    requirements: Requirement[],
+    techStackTypes: TechStackType[]
+  ): Promise<TechChoice[]>;
+  
+  /**
+   * 分析需求
+   * @param requirements 需求列表
+   * @returns 分析结果
+   */
+  analyzeRequirements(requirements: Requirement[]): Promise<string>;
+  
+  /**
+   * 获取架构设计
+   * @param id 架构设计ID
+   * @returns 架构设计，如果不存在则返回undefined
+   */
+  getArchitectureDesign(id: string): ArchitectureDesign | undefined;
+  
+  /**
+   * 获取所有架构设计
+   * @returns 所有架构设计
+   */
+  getAllArchitectureDesigns(): ArchitectureDesign[];
+  
+  /**
+   * 获取技术选择
+   * @param id 技术选择ID
+   * @returns 技术选择，如果不存在则返回undefined
+   */
+  getTechChoice(id: string): TechChoice | undefined;
+  
+  /**
+   * 获取所有技术选择
+   * @returns 所有技术选择
+   */
+  getAllTechChoices(): TechChoice[];
+  
+  /**
+   * 更新架构设计
+   * @param architectureDesign 架构设计
+   * @returns 更新后的架构设计
+   */
+  updateArchitectureDesign(architectureDesign: ArchitectureDesign): ArchitectureDesign;
+  
+  /**
+   * 删除架构设计
+   * @param id 架构设计ID
+   * @returns 是否成功删除
+   */
+  deleteArchitectureDesign(id: string): boolean;
+  
+  /**
+   * 与其他代理协作
+   * 
+   * @param agents 协作代理数组
+   * @param collaborationType 协作类型
+   * @param sessionId 会话ID
+   * @returns 协作结果
+   */
+  collaborate(
+    agents: IAgent[],
+    collaborationType?: CollaborationType,
+    sessionId?: string
+  ): Promise<AgentOutput>;
 }

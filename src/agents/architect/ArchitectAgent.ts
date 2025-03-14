@@ -1,1153 +1,772 @@
-import * as vscode from 'vscode';
 import { v4 as uuidv4 } from 'uuid';
+import { AgentRole, AgentState, AgentCapability, AgentConfig, AgentInput, AgentOutput, IAgent } from '../IAgent';
 import { BaseAgent } from '../BaseAgent';
-import { AgentRole, AgentCapability, AgentState, AgentInput, AgentOutput, AgentAction, AgentConfig } from '../IAgent';
-import { 
-    IArchitectAgent, 
-    ArchitectAgentConfig, 
-    ArchitectAgentInput, 
-    ArchitectAgentOutput,
-    ArchitectureDesign,
-    ArchitectureComponent,
-    ArchitectureRelationship,
-    ArchitectureType,
-    TechnologyStack
-} from './IArchitectAgent';
 import { LLMService } from '../../llm/LLMService';
-import { LLMModelRole } from '../../llm/ILLMProvider';
+import { LLMProviderType, LLMModelRole, LLMRequestOptions } from '../../llm/ILLMProvider';
+import { StorageManager, StorageNamespace, IStorage } from '../../storage/StorageManager';
+import { ToolManager } from '../../tools/ToolManager';
+import { Requirement, UserStory } from '../product/ProductRequirementsAgent';
+import { IArchitectAgent, ArchitectAgentInput, ArchitectAgentOutput } from './IArchitectAgent';
+import { CollaborationType } from '../collaboration';
 
 /**
- * 架构师代理类，负责系统设计和技术选型
+ * 架构类型枚举
+ */
+export enum ArchitectureType {
+  MONOLITHIC = 'monolithic',
+  MICROSERVICES = 'microservices',
+  SERVERLESS = 'serverless',
+  EVENT_DRIVEN = 'event_driven',
+  LAYERED = 'layered',
+  MODULAR = 'modular',
+  HYBRID = 'hybrid'
+}
+
+/**
+ * 技术栈类型枚举
+ */
+export enum TechStackType {
+  FRONTEND = 'frontend',
+  BACKEND = 'backend',
+  DATABASE = 'database',
+  DEVOPS = 'devops',
+  TESTING = 'testing',
+  SECURITY = 'security',
+  MONITORING = 'monitoring'
+}
+
+/**
+ * 技术选择接口
+ */
+export interface TechChoice {
+  id: string;
+  name: string;
+  type: TechStackType;
+  description: string;
+  pros: string[];
+  cons: string[];
+  alternatives: string[];
+  version?: string;
+  url?: string;
+  tags?: string[];
+}
+
+/**
+ * 系统组件接口
+ */
+export interface SystemComponent {
+  id: string;
+  name: string;
+  description: string;
+  responsibilities: string[];
+  dependencies: string[];
+  techChoices: TechChoice[];
+  apis?: string[];
+  dataModels?: string[];
+}
+
+/**
+ * 架构设计接口
+ */
+export interface ArchitectureDesign {
+  id: string;
+  name: string;
+  description: string;
+  type: ArchitectureType;
+  components: SystemComponent[];
+  diagrams?: string[];
+  designPatterns?: string[];
+  nonFunctionalRequirements?: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * 架构师代理配置接口
+ */
+export interface ArchitectAgentConfig extends AgentConfig {
+  systemPrompt?: string;
+  provider?: LLMProviderType;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  preferredTechnologies?: Record<TechStackType, string[]>;
+  avoidedTechnologies?: string[];
+}
+
+/**
+ * 架构师代理类
+ * 
+ * 负责系统架构设计和技术选型
  */
 export class ArchitectAgent extends BaseAgent implements IArchitectAgent {
-    private _designs: Map<string, ArchitectureDesign>;
-    private _technologyStacks: Map<string, TechnologyStack>;
-    private _llmService: LLMService;
-    protected _architectConfig: ArchitectAgentConfig;
+  private architectureDesigns: Map<string, ArchitectureDesign> = new Map();
+  private techChoices: Map<string, TechChoice> = new Map();
+  private llmService: LLMService;
+  private storageManager: StorageManager;
+  private architectStorage: IStorage | null;
+  private systemPrompt: string;
+  private provider?: LLMProviderType;
+  private model?: string;
+  private preferredTechnologies: Record<TechStackType, string[]>;
+  private avoidedTechnologies: string[];
+  
+  /**
+   * 构造函数
+   * 
+   * @param llmService LLM服务
+   * @param storageManager 存储管理器
+   * @param toolManager 工具管理器
+   * @param config 配置
+   */
+  constructor(
+    llmService: LLMService,
+    storageManager: StorageManager,
+    toolManager: ToolManager,
+    config?: ArchitectAgentConfig
+  ) {
+    super();
+    
+    this.llmService = llmService;
+    this.storageManager = storageManager;
+    
+    // 初始化基本属性
+    this.id = uuidv4();
+    this.name = '架构师代理';
+    this.role = AgentRole.ARCHITECT;
+    this.capabilities = [
+      AgentCapability.SYSTEM_DESIGN
+    ];
+    this.state = AgentState.IDLE;
+    
+    // 设置系统提示
+    this.systemPrompt = config?.systemPrompt || `你是一个专业的软件架构师，负责设计系统架构和选择技术栈。
+你的主要职责包括：
+1. 分析需求并设计合适的系统架构
+2. 选择适合项目的技术栈
+3. 定义系统组件及其职责
+4. 确定组件之间的交互方式
+5. 考虑非功能性需求（如可扩展性、性能、安全性等）
+6. 评估不同架构方案的优缺点
 
-    constructor() {
-        super();
-        this.role = AgentRole.ARCHITECT;
-        this.capabilities = [
-            AgentCapability.SYSTEM_DESIGN,
-            AgentCapability.DOCUMENTATION
-        ];
-        this._designs = new Map<string, ArchitectureDesign>();
-        this._technologyStacks = new Map<string, TechnologyStack>();
-        this._llmService = LLMService.getInstance();
-        this._architectConfig = {} as ArchitectAgentConfig;
+请始终保持专业、客观，并确保你的设计决策有充分的理由支持。`;
+    
+    // 设置提供商和模型
+    if (config?.provider) {
+      this.provider = config.provider;
     }
-
-    /**
-     * 初始化回调
-     */
-    protected async onInitialize(): Promise<void> {
-        this._architectConfig = this._config as ArchitectAgentConfig;
-        console.log(`ArchitectAgent ${this.id} initialized with ${this._architectConfig.architectureTemplates?.length || 0} architecture templates.`);
+    
+    if (config?.model) {
+      this.model = config.model;
     }
-
-    /**
-     * 处理输入
-     * @param input 代理输入
-     * @returns 代理输出
-     */
-    public async process(input: AgentInput): Promise<AgentOutput> {
-        const architectInput = input as ArchitectAgentInput;
-        
-        // 处理需求创建架构设计
-        if (architectInput.requirements && architectInput.requirements.length > 0) {
-            const constraints = architectInput.designConstraints || [];
-            const design = await this.createArchitectureDesign(architectInput.requirements, constraints);
-            const technologyStack = await this.recommendTechnologyStack(design.id, constraints);
-            
-            return {
-                agentId: this.id,
-                timestamp: new Date(),
-                status: 'success',
-                message: `已创建架构设计: ${design.name}`,
-                response: `已创建架构设计: ${design.name}`,
-                actions: [{
-                    type: 'architecture_created',
-                    payload: {
-                        design,
-                        technologyStack
-                    }
-                }],
-                architectureDesign: design,
-                technologyStack: technologyStack
-            } as ArchitectAgentOutput;
-        }
-        
-        // 处理现有架构评估
-        if (architectInput.existingArchitecture) {
-            const designId = architectInput.existingArchitecture.id;
-            this._designs.set(designId, architectInput.existingArchitecture);
-            
-            const evaluation = await this.evaluateArchitecture(
-                designId, 
-                architectInput.qualityAttributes?.map(qa => qa.name)
-            );
-            
-            const technicalDebt = await this.analyzeTechnicalDebt(designId);
-            
-            return {
-                agentId: this.id,
-                timestamp: new Date(),
-                status: 'success',
-                message: `架构评估完成，总体得分: ${evaluation.overallScore}`,
-                response: `架构评估完成，总体得分: ${evaluation.overallScore}`,
-                actions: [{
-                    type: 'architecture_evaluated',
-                    payload: {
-                        evaluation,
-                        technicalDebt
-                    }
-                }],
-                architectureDesign: architectInput.existingArchitecture,
-                technicalDebt: technicalDebt
-            } as ArchitectAgentOutput;
-        }
-        
-        // 默认处理
-        return await super.process(input);
-    }
-
-    /**
-     * 调用LLM
-     * @param prompt 提示字符串
-     * @returns LLM响应
-     */
-    protected async callLLM(prompt: string): Promise<string> {
-        try {
-            const response = await this._llmService.sendRequest({
-                model: this._architectConfig.model || 'gpt-4',
-                messages: [{ role: LLMModelRole.USER, content: prompt }],
-                temperature: this._architectConfig.temperature || 0.7,
-                maxTokens: this._architectConfig.maxTokens || 3000
-            });
-            
-            return response.content || '';
-        } catch (error) {
-            console.error('Error calling LLM:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * 创建架构设计
-     * @param requirements 需求列表
-     * @param constraints 约束条件
-     * @returns 架构设计
-     */
-    public async createArchitectureDesign(
-        requirements: any[],
-        constraints?: string[]
-    ): Promise<ArchitectureDesign> {
-        const prompt = this._buildArchitecturePrompt(requirements, constraints);
-        const response = await this.callLLM(prompt);
-        
-        try {
-            // 尝试解析JSON响应
-            const designData = JSON.parse(response);
-            
-            const design: ArchitectureDesign = {
-                id: uuidv4(),
-                name: designData.name || '系统架构设计',
-                description: designData.description || '',
-                type: this._parseArchitectureType(designData.type),
-                components: this._parseComponents(designData.components || []),
-                relationships: this._parseRelationships(designData.relationships || []),
-                principles: designData.principles || [],
-                constraints: constraints || [],
-                qualityAttributes: designData.qualityAttributes || [],
-                createdAt: new Date(),
-                updatedAt: new Date(),
-                metadata: {
-                    source: 'ai_generated',
-                    requirementsCount: requirements.length
-                }
-            };
-            
-            // 存储设计
-            this._designs.set(design.id, design);
-            
-            return design;
-        } catch (error) {
-            console.error('Error parsing architecture design from LLM response:', error);
-            
-            // 创建一个基本设计
-            const design: ArchitectureDesign = {
-                id: uuidv4(),
-                name: '基本系统架构',
-                description: '基于需求自动生成的架构设计',
-                type: ArchitectureType.LAYERED,
-                components: [],
-                relationships: [],
-                principles: [],
-                constraints: constraints || [],
-                qualityAttributes: [],
-                createdAt: new Date(),
-                updatedAt: new Date(),
-                metadata: {
-                    source: 'fallback',
-                    requirementsCount: requirements.length
-                }
-            };
-            
-            // 存储设计
-            this._designs.set(design.id, design);
-            
-            return design;
-        }
-    }
-
-    /**
-     * 更新架构设计
-     * @param designId 设计ID
-     * @param updates 更新内容
-     * @returns 更新后的架构设计
-     */
-    public async updateArchitectureDesign(
-        designId: string,
-        updates: Partial<ArchitectureDesign>
-    ): Promise<ArchitectureDesign> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
-        }
-        
-        const updatedDesign: ArchitectureDesign = {
-            ...design,
-            ...updates,
-            updatedAt: new Date()
-        };
-        
-        // 存储更新后的设计
-        this._designs.set(designId, updatedDesign);
-        
-        return updatedDesign;
-    }
-
-    /**
-     * 添加架构组件
-     * @param designId 设计ID
-     * @param component 组件
-     * @returns 更新后的架构设计
-     */
-    public async addComponent(
-        designId: string,
-        component: ArchitectureComponent
-    ): Promise<ArchitectureDesign> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
-        }
-        
-        // 确保组件有ID
-        if (!component.id) {
-            component.id = uuidv4();
-        }
-        
-        const updatedDesign: ArchitectureDesign = {
-            ...design,
-            components: [...design.components, component],
-            updatedAt: new Date()
-        };
-        
-        // 存储更新后的设计
-        this._designs.set(designId, updatedDesign);
-        
-        return updatedDesign;
-    }
-
-    /**
-     * 更新架构组件
-     * @param designId 设计ID
-     * @param componentId 组件ID
-     * @param updates 更新内容
-     * @returns 更新后的架构设计
-     */
-    public async updateComponent(
-        designId: string,
-        componentId: string,
-        updates: Partial<ArchitectureComponent>
-    ): Promise<ArchitectureDesign> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
-        }
-        
-        const componentIndex = design.components.findIndex(c => c.id === componentId);
-        
-        if (componentIndex === -1) {
-            throw new Error(`Component with id ${componentId} not found in design ${designId}.`);
-        }
-        
-        const updatedComponents = [...design.components];
-        updatedComponents[componentIndex] = {
-            ...updatedComponents[componentIndex],
-            ...updates
-        };
-        
-        const updatedDesign: ArchitectureDesign = {
-            ...design,
-            components: updatedComponents,
-            updatedAt: new Date()
-        };
-        
-        // 存储更新后的设计
-        this._designs.set(designId, updatedDesign);
-        
-        return updatedDesign;
-    }
-
-    /**
-     * 删除架构组件
-     * @param designId 设计ID
-     * @param componentId 组件ID
-     * @returns 更新后的架构设计
-     */
-    public async removeComponent(
-        designId: string,
-        componentId: string
-    ): Promise<ArchitectureDesign> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
-        }
-        
-        // 过滤掉要删除的组件
-        const updatedComponents = design.components.filter(c => c.id !== componentId);
-        
-        // 同时删除与该组件相关的关系
-        const updatedRelationships = design.relationships.filter(
-            r => r.sourceId !== componentId && r.targetId !== componentId
+    
+    // 设置技术偏好
+    this.preferredTechnologies = config?.preferredTechnologies || {
+      [TechStackType.FRONTEND]: ['React', 'TypeScript', 'Next.js'],
+      [TechStackType.BACKEND]: ['Node.js', 'Express', 'NestJS'],
+      [TechStackType.DATABASE]: ['PostgreSQL', 'MongoDB'],
+      [TechStackType.DEVOPS]: ['Docker', 'Kubernetes', 'GitHub Actions'],
+      [TechStackType.TESTING]: ['Jest', 'Cypress'],
+      [TechStackType.SECURITY]: ['OAuth 2.0', 'JWT'],
+      [TechStackType.MONITORING]: ['Prometheus', 'Grafana']
+    };
+    
+    this.avoidedTechnologies = config?.avoidedTechnologies || [];
+    
+    // 获取存储
+    this.architectStorage = this.storageManager.getStorage(StorageNamespace.AGENTS);
+    
+    // 加载存储的架构数据
+    this.loadData();
+  }
+  
+  /**
+   * 初始化时的回调
+   */
+  protected async onInitialize(): Promise<void> {
+    // 加载存储的架构数据
+    await this.loadData();
+  }
+  
+  /**
+   * 处理输入
+   * 
+   * @param input 输入
+   * @returns 输出
+   */
+  public async process(input: ArchitectAgentInput): Promise<ArchitectAgentOutput> {
+    // 设置状态为处理中
+    this.setState(AgentState.PROCESSING);
+    
+    try {
+      let result: ArchitectAgentOutput = {
+        agentId: this.id,
+        timestamp: new Date(),
+        status: 'in_progress',
+        message: '处理中...'
+      };
+      
+      // 根据输入类型处理不同的请求
+      if (input.type === 'create_architecture' && input.requirements && input.projectDescription) {
+        const architectureDesign = await this.createArchitecture(
+          input.requirements,
+          input.userStories || [],
+          input.projectDescription,
+          input.architectureType
         );
         
-        const updatedDesign: ArchitectureDesign = {
-            ...design,
-            components: updatedComponents,
-            relationships: updatedRelationships,
-            updatedAt: new Date()
+        result = {
+          ...result,
+          status: 'success',
+          message: `成功创建架构设计: ${architectureDesign.name}`,
+          architectureDesign
+        };
+      } else if (input.type === 'evaluate_architecture' && input.existingArchitectureId) {
+        const evaluation = await this.evaluateArchitecture(input.existingArchitectureId);
+        
+        result = {
+          ...result,
+          status: 'success',
+          message: '架构评估完成',
+          evaluation
+        };
+      } else if (input.type === 'suggest_tech_stack' && input.requirements) {
+        const techChoices = await this.suggestTechStack(
+          input.requirements,
+          input.techStackTypes || Object.values(TechStackType)
+        );
+        
+        result = {
+          ...result,
+          status: 'success',
+          message: `成功推荐 ${techChoices.length} 个技术选择`,
+          techChoices
+        };
+      } else if (input.type === 'analyze_requirements' && input.requirements) {
+        const analysis = await this.analyzeRequirements(input.requirements);
+        
+        result = {
+          ...result,
+          status: 'success',
+          message: '需求分析完成',
+          analysis
+        };
+      } else {
+        result = {
+          ...result,
+          status: 'error',
+          message: `不支持的输入类型或缺少必要参数: ${input.type}`
+        };
+      }
+      
+      // 设置状态为空闲
+      this.setState(AgentState.IDLE);
+      
+      return result;
+    } catch (error: any) {
+      // 设置状态为错误
+      this.setState(AgentState.ERROR);
+      
+      return {
+        agentId: this.id,
+        timestamp: new Date(),
+        status: 'error',
+        message: `处理失败: ${error.message}`
+      };
+    }
+  }
+  
+  /**
+   * 创建架构设计
+   * 
+   * @param requirements 需求列表
+   * @param userStories 用户故事列表
+   * @param projectDescription 项目描述
+   * @param architectureType 架构类型（可选）
+   * @returns 创建的架构设计
+   */
+  public async createArchitecture(
+    requirements: Requirement[],
+    userStories: UserStory[],
+    projectDescription: string,
+    architectureType?: ArchitectureType
+  ): Promise<ArchitectureDesign> {
+    const prompt = `请根据以下项目描述、需求和用户故事，设计一个合适的系统架构。
+${architectureType ? `请使用 ${architectureType} 架构类型。` : '请选择最合适的架构类型。'}
+
+项目描述：
+${projectDescription}
+
+需求列表：
+${requirements.map((req, index) => `${index + 1}. ${req.title}: ${req.description} (类型: ${req.type}, 优先级: ${req.priority})`).join('\n')}
+
+${userStories.length > 0 ? `用户故事：
+${userStories.map((story, index) => `${index + 1}. ${story.title}: ${story.description}`).join('\n')}` : ''}
+
+请设计一个完整的系统架构，包括：
+1. 架构类型和总体描述
+2. 主要系统组件及其职责
+3. 组件之间的依赖关系
+4. 每个组件的技术选择
+5. 考虑的设计模式
+6. 如何满足非功能性需求
+
+请以JSON格式返回结果，格式如下：
+{
+  "name": "架构名称",
+  "description": "架构总体描述",
+  "type": "架构类型(monolithic|microservices|serverless|event_driven|layered|modular|hybrid)",
+  "components": [
+    {
+      "name": "组件名称",
+      "description": "组件描述",
+      "responsibilities": ["职责1", "职责2"],
+      "dependencies": ["依赖组件1", "依赖组件2"],
+      "techChoices": [
+        {
+          "name": "技术名称",
+          "type": "技术类型(frontend|backend|database|devops|testing|security|monitoring)",
+          "description": "技术描述",
+          "pros": ["优点1", "优点2"],
+          "cons": ["缺点1", "缺点2"],
+          "alternatives": ["替代技术1", "替代技术2"]
+        }
+      ]
+    }
+  ],
+  "designPatterns": ["设计模式1", "设计模式2"],
+  "nonFunctionalRequirements": ["非功能性需求1", "非功能性需求2"]
+}`;
+    
+    const requestOptions: LLMRequestOptions = {
+      messages: [
+        { role: LLMModelRole.SYSTEM, content: this.systemPrompt },
+        { role: LLMModelRole.USER, content: prompt }
+      ],
+      model: this.model || 'gpt-4',
+      temperature: 0.7,
+      maxTokens: 4000
+    };
+    
+    const response = await this.llmService.sendRequest(requestOptions, this.provider);
+    
+    try {
+      const result = JSON.parse(response.content);
+      
+      // 创建技术选择
+      const allTechChoices: TechChoice[] = [];
+      
+      // 处理组件和技术选择
+      const components: SystemComponent[] = result.components.map((comp: any) => {
+        const techChoices: TechChoice[] = comp.techChoices.map((tech: any) => {
+          const techChoice: TechChoice = {
+            id: uuidv4(),
+            name: tech.name,
+            type: this.mapTechStackType(tech.type),
+            description: tech.description,
+            pros: tech.pros || [],
+            cons: tech.cons || [],
+            alternatives: tech.alternatives || [],
+            tags: []
+          };
+          
+          // 存储技术选择
+          this.techChoices.set(techChoice.id, techChoice);
+          allTechChoices.push(techChoice);
+          
+          return techChoice;
+        });
+        
+        return {
+          id: uuidv4(),
+          name: comp.name,
+          description: comp.description,
+          responsibilities: comp.responsibilities || [],
+          dependencies: comp.dependencies || [],
+          techChoices,
+          apis: comp.apis || [],
+          dataModels: comp.dataModels || []
+        };
+      });
+      
+      // 创建架构设计
+      const architectureDesign: ArchitectureDesign = {
+        id: uuidv4(),
+        name: result.name,
+        description: result.description,
+        type: this.mapArchitectureType(result.type),
+        components,
+        designPatterns: result.designPatterns || [],
+        nonFunctionalRequirements: result.nonFunctionalRequirements || [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      
+      // 存储架构设计
+      this.architectureDesigns.set(architectureDesign.id, architectureDesign);
+      
+      // 保存数据
+      this.saveData();
+      
+      return architectureDesign;
+    } catch (error) {
+      console.error('解析架构设计失败:', error);
+      throw new Error('解析架构设计失败');
+    }
+  }
+  
+  /**
+   * 评估架构设计
+   * 
+   * @param architectureId 架构设计ID
+   * @returns 评估结果
+   */
+  public async evaluateArchitecture(architectureId: string): Promise<string> {
+    const architecture = this.architectureDesigns.get(architectureId);
+    
+    if (!architecture) {
+      throw new Error(`架构设计不存在: ${architectureId}`);
+    }
+    
+    const prompt = `请评估以下系统架构设计，包括其优点、缺点、潜在风险和改进建议。
+
+架构名称: ${architecture.name}
+架构描述: ${architecture.description}
+架构类型: ${architecture.type}
+
+系统组件:
+${architecture.components.map((comp, index) => {
+  return `${index + 1}. ${comp.name}:
+   描述: ${comp.description}
+   职责: ${comp.responsibilities.join(', ')}
+   依赖: ${comp.dependencies.join(', ')}
+   技术选择: ${comp.techChoices.map(tech => tech.name).join(', ')}`;
+}).join('\n')}
+
+设计模式: ${architecture.designPatterns?.join(', ') || '无'}
+非功能性需求: ${architecture.nonFunctionalRequirements?.join(', ') || '无'}
+
+请从以下几个方面进行评估：
+1. 架构的整体合理性
+2. 组件划分和职责分配
+3. 技术选择的适当性
+4. 可扩展性和可维护性
+5. 性能和安全性考虑
+6. 潜在的风险和挑战
+7. 改进建议
+
+请提供详细的评估报告。`;
+    
+    const requestOptions: LLMRequestOptions = {
+      messages: [
+        { role: LLMModelRole.SYSTEM, content: this.systemPrompt },
+        { role: LLMModelRole.USER, content: prompt }
+      ],
+      model: this.model || 'gpt-4',
+      temperature: 0.7
+    };
+    
+    const response = await this.llmService.sendRequest(requestOptions, this.provider);
+    return response.content;
+  }
+  
+  /**
+   * 推荐技术栈
+   * 
+   * @param requirements 需求列表
+   * @param techStackTypes 技术栈类型列表
+   * @returns 推荐的技术选择列表
+   */
+  public async suggestTechStack(
+    requirements: Requirement[],
+    techStackTypes: TechStackType[]
+  ): Promise<TechChoice[]> {
+    const prompt = `请根据以下项目需求，推荐合适的技术栈。
+我们特别关注以下技术领域: ${techStackTypes.join(', ')}
+
+需求列表：
+${requirements.map((req, index) => `${index + 1}. ${req.title}: ${req.description} (类型: ${req.type}, 优先级: ${req.priority})`).join('\n')}
+
+${this.preferredTechnologies && Object.keys(this.preferredTechnologies).length > 0 ? 
+`我们倾向于使用以下技术:
+${Object.entries(this.preferredTechnologies)
+  .filter(([type]) => techStackTypes.includes(type as TechStackType))
+  .map(([type, techs]) => `${type}: ${techs.join(', ')}`)
+  .join('\n')}` : ''}
+
+${this.avoidedTechnologies && this.avoidedTechnologies.length > 0 ? 
+`我们希望避免使用以下技术:
+${this.avoidedTechnologies.join(', ')}` : ''}
+
+请为每个技术领域推荐最合适的技术，并说明选择理由。
+
+请以JSON格式返回结果，格式如下：
+{
+  "techChoices": [
+    {
+      "name": "技术名称",
+      "type": "技术类型(frontend|backend|database|devops|testing|security|monitoring)",
+      "description": "技术描述",
+      "pros": ["优点1", "优点2"],
+      "cons": ["缺点1", "缺点2"],
+      "alternatives": ["替代技术1", "替代技术2"],
+      "version": "推荐版本"
+    }
+  ]
+}`;
+    
+    const requestOptions: LLMRequestOptions = {
+      messages: [
+        { role: LLMModelRole.SYSTEM, content: this.systemPrompt },
+        { role: LLMModelRole.USER, content: prompt }
+      ],
+      model: this.model || 'gpt-4',
+      temperature: 0.7
+    };
+    
+    const response = await this.llmService.sendRequest(requestOptions, this.provider);
+    
+    try {
+      const result = JSON.parse(response.content);
+      const techChoices: TechChoice[] = result.techChoices.map((tech: any) => {
+        const techChoice: TechChoice = {
+          id: uuidv4(),
+          name: tech.name,
+          type: this.mapTechStackType(tech.type),
+          description: tech.description,
+          pros: tech.pros || [],
+          cons: tech.cons || [],
+          alternatives: tech.alternatives || [],
+          version: tech.version,
+          url: tech.url,
+          tags: []
         };
         
-        // 存储更新后的设计
-        this._designs.set(designId, updatedDesign);
+        // 存储技术选择
+        this.techChoices.set(techChoice.id, techChoice);
         
-        return updatedDesign;
+        return techChoice;
+      });
+      
+      // 保存数据
+      this.saveData();
+      
+      return techChoices;
+    } catch (error) {
+      console.error('解析技术栈推荐失败:', error);
+      throw new Error('解析技术栈推荐失败');
     }
+  }
+  
+  /**
+   * 分析需求
+   * 
+   * @param requirements 需求列表
+   * @returns 分析结果
+   */
+  public async analyzeRequirements(requirements: Requirement[]): Promise<string> {
+    const prompt = `请从架构设计的角度分析以下需求，包括技术挑战、架构考虑因素和可能的实现方案。
 
-    /**
-     * 添加架构关系
-     * @param designId 设计ID
-     * @param relationship 关系
-     * @returns 更新后的架构设计
-     */
-    public async addRelationship(
-        designId: string,
-        relationship: ArchitectureRelationship
-    ): Promise<ArchitectureDesign> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
-        }
-        
-        // 确保关系有ID
-        if (!relationship.id) {
-            relationship.id = uuidv4();
-        }
-        
-        // 验证源组件和目标组件存在
-        const sourceExists = design.components.some(c => c.id === relationship.sourceId);
-        const targetExists = design.components.some(c => c.id === relationship.targetId);
-        
-        if (!sourceExists) {
-            throw new Error(`Source component with id ${relationship.sourceId} not found in design ${designId}.`);
-        }
-        
-        if (!targetExists) {
-            throw new Error(`Target component with id ${relationship.targetId} not found in design ${designId}.`);
-        }
-        
-        const updatedDesign: ArchitectureDesign = {
-            ...design,
-            relationships: [...design.relationships, relationship],
-            updatedAt: new Date()
-        };
-        
-        // 存储更新后的设计
-        this._designs.set(designId, updatedDesign);
-        
-        return updatedDesign;
+需求列表：
+${requirements.map((req, index) => `${index + 1}. ${req.title}: ${req.description} (类型: ${req.type}, 优先级: ${req.priority})`).join('\n')}
+
+请从以下几个方面进行分析：
+1. 技术挑战和复杂性
+2. 架构设计考虑因素
+3. 可能的实现方案
+4. 技术风险和缓解策略
+5. 对系统架构的影响
+
+请提供详细的分析报告。`;
+    
+    const requestOptions: LLMRequestOptions = {
+      messages: [
+        { role: LLMModelRole.SYSTEM, content: this.systemPrompt },
+        { role: LLMModelRole.USER, content: prompt }
+      ],
+      model: this.model || 'gpt-4',
+      temperature: 0.7
+    };
+    
+    const response = await this.llmService.sendRequest(requestOptions, this.provider);
+    return response.content;
+  }
+  
+  /**
+   * 获取架构设计
+   * 
+   * @param id 架构设计ID
+   * @returns 架构设计，如果不存在则返回undefined
+   */
+  public getArchitectureDesign(id: string): ArchitectureDesign | undefined {
+    return this.architectureDesigns.get(id);
+  }
+  
+  /**
+   * 获取所有架构设计
+   * 
+   * @returns 所有架构设计
+   */
+  public getAllArchitectureDesigns(): ArchitectureDesign[] {
+    return Array.from(this.architectureDesigns.values());
+  }
+  
+  /**
+   * 获取技术选择
+   * 
+   * @param id 技术选择ID
+   * @returns 技术选择，如果不存在则返回undefined
+   */
+  public getTechChoice(id: string): TechChoice | undefined {
+    return this.techChoices.get(id);
+  }
+  
+  /**
+   * 获取所有技术选择
+   * 
+   * @returns 所有技术选择
+   */
+  public getAllTechChoices(): TechChoice[] {
+    return Array.from(this.techChoices.values());
+  }
+  
+  /**
+   * 更新架构设计
+   * 
+   * @param architectureDesign 架构设计
+   * @returns 更新后的架构设计
+   */
+  public updateArchitectureDesign(architectureDesign: ArchitectureDesign): ArchitectureDesign {
+    architectureDesign.updatedAt = new Date();
+    this.architectureDesigns.set(architectureDesign.id, architectureDesign);
+    
+    // 保存数据
+    this.saveData();
+    
+    return architectureDesign;
+  }
+  
+  /**
+   * 删除架构设计
+   * 
+   * @param id 架构设计ID
+   * @returns 是否成功删除
+   */
+  public deleteArchitectureDesign(id: string): boolean {
+    const result = this.architectureDesigns.delete(id);
+    
+    if (result) {
+      // 保存数据
+      this.saveData();
     }
-
-    /**
-     * 更新架构关系
-     * @param designId 设计ID
-     * @param relationshipId 关系ID
-     * @param updates 更新内容
-     * @returns 更新后的架构设计
-     */
-    public async updateRelationship(
-        designId: string,
-        relationshipId: string,
-        updates: Partial<ArchitectureRelationship>
-    ): Promise<ArchitectureDesign> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
+    
+    return result;
+  }
+  
+  /**
+   * 加载数据
+   */
+  private async loadData(): Promise<void> {
+    try {
+      if (this.architectStorage) {
+        // 加载架构设计数据
+        const architectureData = await this.architectStorage.get('architectureDesigns');
+        if (architectureData) {
+          for (const [id, design] of Object.entries(architectureData as Record<string, ArchitectureDesign>)) {
+            this.architectureDesigns.set(id, design as ArchitectureDesign);
+          }
         }
         
-        const relationshipIndex = design.relationships.findIndex(r => r.id === relationshipId);
-        
-        if (relationshipIndex === -1) {
-            throw new Error(`Relationship with id ${relationshipId} not found in design ${designId}.`);
+        // 加载技术选择数据
+        const techChoicesData = await this.architectStorage.get('techChoices');
+        if (techChoicesData) {
+          for (const [id, choice] of Object.entries(techChoicesData as Record<string, TechChoice>)) {
+            this.techChoices.set(id, choice as TechChoice);
+          }
         }
-        
-        const updatedRelationships = [...design.relationships];
-        updatedRelationships[relationshipIndex] = {
-            ...updatedRelationships[relationshipIndex],
-            ...updates
-        };
-        
-        const updatedDesign: ArchitectureDesign = {
-            ...design,
-            relationships: updatedRelationships,
-            updatedAt: new Date()
-        };
-        
-        // 存储更新后的设计
-        this._designs.set(designId, updatedDesign);
-        
-        return updatedDesign;
+      }
+    } catch (error) {
+      console.error('加载数据失败:', error);
     }
-
-    /**
-     * 删除架构关系
-     * @param designId 设计ID
-     * @param relationshipId 关系ID
-     * @returns 更新后的架构设计
-     */
-    public async removeRelationship(
-        designId: string,
-        relationshipId: string
-    ): Promise<ArchitectureDesign> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
+  }
+  
+  /**
+   * 保存数据
+   */
+  private async saveData(): Promise<void> {
+    try {
+      if (this.architectStorage) {
+        // 保存架构设计数据
+        const architectureData: Record<string, ArchitectureDesign> = {};
+        for (const [id, design] of this.architectureDesigns.entries()) {
+          architectureData[id] = design;
         }
+        await this.architectStorage.set('architectureDesigns', architectureData);
         
-        // 过滤掉要删除的关系
-        const updatedRelationships = design.relationships.filter(r => r.id !== relationshipId);
-        
-        const updatedDesign: ArchitectureDesign = {
-            ...design,
-            relationships: updatedRelationships,
-            updatedAt: new Date()
-        };
-        
-        // 存储更新后的设计
-        this._designs.set(designId, updatedDesign);
-        
-        return updatedDesign;
+        // 保存技术选择数据
+        const techChoicesData: Record<string, TechChoice> = {};
+        for (const [id, choice] of this.techChoices.entries()) {
+          techChoicesData[id] = choice;
+        }
+        await this.architectStorage.set('techChoices', techChoicesData);
+      }
+    } catch (error) {
+      console.error('保存数据失败:', error);
     }
-
-    /**
-     * 评估架构设计
-     * @param designId 设计ID
-     * @param qualityAttributes 质量属性
-     * @returns 评估结果
-     */
-    public async evaluateArchitecture(
-        designId: string,
-        qualityAttributes?: string[]
-    ): Promise<{
-        overallScore: number;
-        attributeScores: Record<string, number>;
-        strengths: string[];
-        weaknesses: string[];
-        recommendations: string[];
-    }> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
-        }
-        
-        const prompt = this._buildEvaluationPrompt(design, qualityAttributes);
-        const response = await this.callLLM(prompt);
-        
-        try {
-            // 尝试解析JSON响应
-            const evaluationData = JSON.parse(response);
-            
-            return {
-                overallScore: evaluationData.overallScore || 0,
-                attributeScores: evaluationData.attributeScores || {},
-                strengths: evaluationData.strengths || [],
-                weaknesses: evaluationData.weaknesses || [],
-                recommendations: evaluationData.recommendations || []
-            };
-        } catch (error) {
-            console.error('Error parsing architecture evaluation from LLM response:', error);
-            
-            // 返回基本评估
-            return {
-                overallScore: 5,
-                attributeScores: {},
-                strengths: ['架构设计已完成'],
-                weaknesses: ['需要进一步细化'],
-                recommendations: ['添加更多组件细节', '定义更清晰的接口']
-            };
-        }
+  }
+  
+  /**
+   * 映射架构类型
+   * 
+   * @param type 架构类型字符串
+   * @returns 架构类型枚举
+   */
+  private mapArchitectureType(type: string): ArchitectureType {
+    switch (type.toLowerCase()) {
+      case 'monolithic':
+        return ArchitectureType.MONOLITHIC;
+      case 'microservices':
+        return ArchitectureType.MICROSERVICES;
+      case 'serverless':
+        return ArchitectureType.SERVERLESS;
+      case 'event_driven':
+      case 'event-driven':
+        return ArchitectureType.EVENT_DRIVEN;
+      case 'layered':
+        return ArchitectureType.LAYERED;
+      case 'modular':
+        return ArchitectureType.MODULAR;
+      case 'hybrid':
+        return ArchitectureType.HYBRID;
+      default:
+        return ArchitectureType.MODULAR;
     }
-
-    /**
-     * 推荐技术栈
-     * @param designId 设计ID
-     * @param constraints 约束条件
-     * @returns 技术栈
-     */
-    public async recommendTechnologyStack(
-        designId: string,
-        constraints?: string[]
-    ): Promise<TechnologyStack> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
-        }
-        
-        const prompt = this._buildTechnologyStackPrompt(design, constraints);
-        const response = await this.callLLM(prompt);
-        
-        try {
-            // 尝试解析JSON响应
-            const techStackData = JSON.parse(response);
-            
-            const technologyStack: TechnologyStack = {
-                id: uuidv4(),
-                name: techStackData.name || '推荐技术栈',
-                description: techStackData.description || '',
-                categories: techStackData.categories || [],
-                recommendations: techStackData.recommendations || [],
-                createdAt: new Date(),
-                updatedAt: new Date()
-            };
-            
-            // 存储技术栈
-            this._technologyStacks.set(technologyStack.id, technologyStack);
-            
-            return technologyStack;
-        } catch (error) {
-            console.error('Error parsing technology stack from LLM response:', error);
-            
-            // 创建一个基本技术栈
-            const technologyStack: TechnologyStack = {
-                id: uuidv4(),
-                name: '基本技术栈',
-                description: '基于架构设计自动生成的技术栈推荐',
-                categories: [
-                    {
-                        name: '前端',
-                        technologies: [
-                            {
-                                name: 'React',
-                                version: '18.x',
-                                description: '用户界面库'
-                            }
-                        ]
-                    },
-                    {
-                        name: '后端',
-                        technologies: [
-                            {
-                                name: 'Node.js',
-                                version: '18.x',
-                                description: '服务器运行时'
-                            }
-                        ]
-                    }
-                ],
-                createdAt: new Date(),
-                updatedAt: new Date()
-            };
-            
-            // 存储技术栈
-            this._technologyStacks.set(technologyStack.id, technologyStack);
-            
-            return technologyStack;
-        }
+  }
+  
+  /**
+   * 映射技术栈类型
+   * 
+   * @param type 技术栈类型字符串
+   * @returns 技术栈类型枚举
+   */
+  private mapTechStackType(type: string): TechStackType {
+    switch (type.toLowerCase()) {
+      case 'frontend':
+        return TechStackType.FRONTEND;
+      case 'backend':
+        return TechStackType.BACKEND;
+      case 'database':
+        return TechStackType.DATABASE;
+      case 'devops':
+        return TechStackType.DEVOPS;
+      case 'testing':
+        return TechStackType.TESTING;
+      case 'security':
+        return TechStackType.SECURITY;
+      case 'monitoring':
+        return TechStackType.MONITORING;
+      default:
+        return TechStackType.BACKEND;
     }
-
-    /**
-     * 生成架构图
-     * @param designId 设计ID
-     * @param diagramType 图表类型
-     * @returns 架构图
-     */
-    public async generateArchitectureDiagram(
-        designId: string,
-        diagramType: string
-    ): Promise<{
-        id: string;
-        name: string;
-        type: string;
-        content: string;
-    }> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
-        }
-        
-        const prompt = this._buildDiagramPrompt(design, diagramType);
-        const response = await this.callLLM(prompt);
-        
-        try {
-            // 尝试解析JSON响应
-            const diagramData = JSON.parse(response);
-            
-            const diagram = {
-                id: uuidv4(),
-                name: diagramData.name || `${diagramType} 图`,
-                type: diagramType,
-                content: diagramData.content || ''
-            };
-            
-            // 更新设计中的图表
-            const updatedDiagrams = design.diagrams ? [...design.diagrams] : [];
-            updatedDiagrams.push(diagram);
-            
-            await this.updateArchitectureDesign(designId, { diagrams: updatedDiagrams });
-            
-            return diagram;
-        } catch (error) {
-            console.error('Error parsing diagram from LLM response:', error);
-            
-            // 创建一个基本图表
-            const diagram = {
-                id: uuidv4(),
-                name: `${diagramType} 图`,
-                type: diagramType,
-                content: '// 基本图表内容'
-            };
-            
-            return diagram;
-        }
-    }
-
-    /**
-     * 分析技术债务
-     * @param designId 设计ID
-     * @returns 技术债务列表
-     */
-    public async analyzeTechnicalDebt(
-        designId: string
-    ): Promise<{
-        id: string;
-        description: string;
-        impact: 'high' | 'medium' | 'low';
-        remediationStrategy?: string;
-    }[]> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
-        }
-        
-        const prompt = this._buildTechnicalDebtPrompt(design);
-        const response = await this.callLLM(prompt);
-        
-        try {
-            // 尝试解析JSON响应
-            const debtItems = JSON.parse(response);
-            
-            if (Array.isArray(debtItems)) {
-                return debtItems.map(item => ({
-                    id: uuidv4(),
-                    description: item.description || '',
-                    impact: item.impact || 'medium',
-                    remediationStrategy: item.remediationStrategy
-                }));
-            }
-            
-            return [];
-        } catch (error) {
-            console.error('Error parsing technical debt from LLM response:', error);
-            
-            // 返回基本技术债务
-            return [
-                {
-                    id: uuidv4(),
-                    description: '架构文档不完整',
-                    impact: 'medium',
-                    remediationStrategy: '完善架构文档，添加更多细节'
-                }
-            ];
-        }
-    }
-
-    /**
-     * 验证架构设计
-     * @param designId 设计ID
-     * @param requirements 需求列表
-     * @returns 验证结果
-     */
-    public async validateArchitecture(
-        designId: string,
-        requirements: any[]
-    ): Promise<{
-        isValid: boolean;
-        issues: {
-            componentId?: string;
-            relationshipId?: string;
-            description: string;
-            severity: 'critical' | 'major' | 'minor';
-        }[];
-        requirementsCoverage: number;
-    }> {
-        const design = this._designs.get(designId);
-        
-        if (!design) {
-            throw new Error(`Architecture design with id ${designId} not found.`);
-        }
-        
-        const prompt = this._buildValidationPrompt(design, requirements);
-        const response = await this.callLLM(prompt);
-        
-        try {
-            // 尝试解析JSON响应
-            const validationData = JSON.parse(response);
-            
-            return {
-                isValid: validationData.isValid || false,
-                issues: validationData.issues || [],
-                requirementsCoverage: validationData.requirementsCoverage || 0
-            };
-        } catch (error) {
-            console.error('Error parsing validation result from LLM response:', error);
-            
-            // 返回基本验证结果
-            return {
-                isValid: design.components.length > 0,
-                issues: [
-                    {
-                        description: '需要进一步验证架构设计是否满足所有需求',
-                        severity: 'major'
-                    }
-                ],
-                requirementsCoverage: 0.5
-            };
-        }
-    }
-
-    /**
-     * 构建架构提示
-     * @param requirements 需求列表
-     * @param constraints 约束条件
-     * @returns 提示字符串
-     */
-    private _buildArchitecturePrompt(requirements: any[], constraints?: string[]): string {
-        let prompt = '';
-        
-        // 使用模板（如果有）
-        if (this._architectConfig.architectureTemplates && this._architectConfig.architectureTemplates.length > 0) {
-            prompt += this._architectConfig.architectureTemplates[0] + '\n\n';
-        } else {
-            prompt += `你是一名经验丰富的软件架构师，负责设计系统架构。
-请根据以下需求和约束条件，创建一个完整的架构设计。
-返回一个JSON对象，包含以下字段：
-- name: 架构名称
-- description: 架构描述
-- type: 架构类型（monolithic, microservices, serverless, event_driven, layered, modular, custom）
-- components: 组件数组，每个组件包含id, name, type, description, responsibilities, dependencies
-- relationships: 关系数组，每个关系包含sourceId, targetId, type, description
-- principles: 架构原则数组
-- qualityAttributes: 质量属性数组，每个包含name, description, priority
-
-只返回JSON对象，不要包含其他解释。\n\n`;
-        }
-        
-        prompt += `需求列表:\n`;
-        requirements.forEach((req, index) => {
-            prompt += `${index + 1}. `;
-            if (typeof req === 'string') {
-                prompt += req + '\n';
-            } else if (req.title) {
-                prompt += `${req.title}\n`;
-                if (req.description) {
-                    prompt += `   描述: ${req.description}\n`;
-                }
-                if (req.priority) {
-                    prompt += `   优先级: ${req.priority}\n`;
-                }
-            }
-        });
-        
-        if (constraints && constraints.length > 0) {
-            prompt += `\n约束条件:\n`;
-            constraints.forEach((constraint, index) => {
-                prompt += `${index + 1}. ${constraint}\n`;
-            });
-        }
-        
-        // 添加设计原则（如果有）
-        if (this._architectConfig.designPrinciples && this._architectConfig.designPrinciples.length > 0) {
-            prompt += `\n设计原则:\n`;
-            this._architectConfig.designPrinciples.forEach((principle, index) => {
-                prompt += `${index + 1}. ${principle}\n`;
-            });
-        }
-        
-        return prompt;
-    }
-
-    /**
-     * 构建评估提示
-     * @param design 架构设计
-     * @param qualityAttributes 质量属性
-     * @returns 提示字符串
-     */
-    private _buildEvaluationPrompt(design: ArchitectureDesign, qualityAttributes?: string[]): string {
-        let prompt = `你是一名经验丰富的软件架构评估专家，负责评估架构设计的质量。
-请对以下架构设计进行全面评估，并返回一个JSON对象，包含以下字段：
-- overallScore: 总体评分（0-10）
-- attributeScores: 各质量属性的评分（键值对）
-- strengths: 优点数组
-- weaknesses: 缺点数组
-- recommendations: 改进建议数组
-
-只返回JSON对象，不要包含其他解释。\n\n`;
-        
-        prompt += `架构设计:\n`;
-        prompt += `名称: ${design.name}\n`;
-        prompt += `描述: ${design.description}\n`;
-        prompt += `类型: ${design.type}\n\n`;
-        
-        prompt += `组件 (${design.components.length}):\n`;
-        design.components.forEach((component, index) => {
-            prompt += `${index + 1}. ${component.name} (${component.type})\n`;
-            prompt += `   描述: ${component.description}\n`;
-            prompt += `   职责: ${component.responsibilities.join(', ')}\n`;
-            if (component.dependencies.length > 0) {
-                prompt += `   依赖: ${component.dependencies.join(', ')}\n`;
-            }
-        });
-        
-        prompt += `\n关系 (${design.relationships.length}):\n`;
-        design.relationships.forEach((rel, index) => {
-            const source = design.components.find(c => c.id === rel.sourceId);
-            const target = design.components.find(c => c.id === rel.targetId);
-            prompt += `${index + 1}. ${source?.name || rel.sourceId} -> ${target?.name || rel.targetId} (${rel.type})\n`;
-            prompt += `   描述: ${rel.description}\n`;
-        });
-        
-        if (design.principles.length > 0) {
-            prompt += `\n原则:\n`;
-            design.principles.forEach((principle, index) => {
-                prompt += `${index + 1}. ${principle}\n`;
-            });
-        }
-        
-        if (design.qualityAttributes.length > 0) {
-            prompt += `\n质量属性:\n`;
-            design.qualityAttributes.forEach((qa, index) => {
-                prompt += `${index + 1}. ${qa.name} (${qa.priority})\n`;
-                prompt += `   描述: ${qa.description}\n`;
-            });
-        }
-        
-        if (qualityAttributes && qualityAttributes.length > 0) {
-            prompt += `\n请特别关注以下质量属性:\n`;
-            qualityAttributes.forEach((qa, index) => {
-                prompt += `${index + 1}. ${qa}\n`;
-            });
-        }
-        
-        // 添加权重（如果有）
-        if (this._architectConfig.qualityAttributeWeights) {
-            prompt += `\n质量属性权重:\n`;
-            for (const [attribute, weight] of Object.entries(this._architectConfig.qualityAttributeWeights)) {
-                prompt += `${attribute}: ${weight}\n`;
-            }
-        }
-        
-        return prompt;
-    }
-
-    /**
-     * 构建技术栈提示
-     * @param design 架构设计
-     * @param constraints 约束条件
-     * @returns 提示字符串
-     */
-    private _buildTechnologyStackPrompt(design: ArchitectureDesign, constraints?: string[]): string {
-        let prompt = `你是一名经验丰富的技术架构师，负责选择适合的技术栈。
-请根据以下架构设计和约束条件，推荐一个完整的技术栈。
-返回一个JSON对象，包含以下字段：
-- name: 技术栈名称
-- description: 技术栈描述
-- categories: 技术类别数组，每个类别包含name和technologies数组
-- recommendations: 推荐数组，每个包含scenario, recommendation, alternatives
-
-technologies数组中的每个技术应包含name, version, description, pros, cons
-
-只返回JSON对象，不要包含其他解释。\n\n`;
-        
-        prompt += `架构设计:\n`;
-        prompt += `名称: ${design.name}\n`;
-        prompt += `描述: ${design.description}\n`;
-        prompt += `类型: ${design.type}\n\n`;
-        
-        prompt += `组件:\n`;
-        design.components.forEach((component, index) => {
-            prompt += `${index + 1}. ${component.name} (${component.type})\n`;
-            prompt += `   描述: ${component.description}\n`;
-            prompt += `   职责: ${component.responsibilities.join(', ')}\n`;
-        });
-        
-        if (constraints && constraints.length > 0) {
-            prompt += `\n约束条件:\n`;
-            constraints.forEach((constraint, index) => {
-                prompt += `${index + 1}. ${constraint}\n`;
-            });
-        }
-        
-        // 添加评估策略（如果有）
-        if (this._architectConfig.technologyEvaluationStrategy) {
-            prompt += `\n技术评估策略:\n${this._architectConfig.technologyEvaluationStrategy}\n`;
-        }
-        
-        return prompt;
-    }
-
-    /**
-     * 构建图表提示
-     * @param design 架构设计
-     * @param diagramType 图表类型
-     * @returns 提示字符串
-     */
-    private _buildDiagramPrompt(design: ArchitectureDesign, diagramType: string): string {
-        let prompt = `你是一名经验丰富的软件架构师，擅长创建架构图。
-请根据以下架构设计，创建一个${diagramType}图。
-返回一个JSON对象，包含以下字段：
-- name: 图表名称
-- content: 图表内容（使用适当的格式，如PlantUML、Mermaid等）
-
-只返回JSON对象，不要包含其他解释。\n\n`;
-        
-        prompt += `架构设计:\n`;
-        prompt += `名称: ${design.name}\n`;
-        prompt += `描述: ${design.description}\n`;
-        prompt += `类型: ${design.type}\n\n`;
-        
-        prompt += `组件:\n`;
-        design.components.forEach((component, index) => {
-            prompt += `${index + 1}. ${component.name} (${component.type})\n`;
-            prompt += `   ID: ${component.id}\n`;
-            prompt += `   描述: ${component.description}\n`;
-        });
-        
-        prompt += `\n关系:\n`;
-        design.relationships.forEach((rel, index) => {
-            const source = design.components.find(c => c.id === rel.sourceId);
-            const target = design.components.find(c => c.id === rel.targetId);
-            prompt += `${index + 1}. ${source?.name || rel.sourceId} -> ${target?.name || rel.targetId} (${rel.type})\n`;
-            prompt += `   描述: ${rel.description}\n`;
-        });
-        
-        if (diagramType.toLowerCase() === 'c4') {
-            prompt += `\n请使用C4模型格式创建图表，包括Context, Container, Component和Code级别的视图。\n`;
-        } else if (diagramType.toLowerCase() === 'uml') {
-            prompt += `\n请使用UML格式创建图表，使用PlantUML语法。\n`;
-        } else if (diagramType.toLowerCase() === 'mermaid') {
-            prompt += `\n请使用Mermaid格式创建图表。\n`;
-        }
-        
-        return prompt;
-    }
-
-    /**
-     * 构建技术债务提示
-     * @param design 架构设计
-     * @returns 提示字符串
-     */
-    private _buildTechnicalDebtPrompt(design: ArchitectureDesign): string {
-        let prompt = `你是一名经验丰富的软件架构师，擅长识别技术债务。
-请分析以下架构设计，识别潜在的技术债务。
-返回一个JSON数组，每个元素包含以下字段：
-- description: 技术债务描述
-- impact: 影响程度（high, medium, low）
-- remediationStrategy: 修复策略
-
-只返回JSON数组，不要包含其他解释。\n\n`;
-        
-        prompt += `架构设计:\n`;
-        prompt += `名称: ${design.name}\n`;
-        prompt += `描述: ${design.description}\n`;
-        prompt += `类型: ${design.type}\n\n`;
-        
-        prompt += `组件 (${design.components.length}):\n`;
-        design.components.forEach((component, index) => {
-            prompt += `${index + 1}. ${component.name} (${component.type})\n`;
-            prompt += `   描述: ${component.description}\n`;
-            prompt += `   职责: ${component.responsibilities.join(', ')}\n`;
-            if (component.dependencies.length > 0) {
-                prompt += `   依赖: ${component.dependencies.join(', ')}\n`;
-            }
-        });
-        
-        prompt += `\n关系 (${design.relationships.length}):\n`;
-        design.relationships.forEach((rel, index) => {
-            const source = design.components.find(c => c.id === rel.sourceId);
-            const target = design.components.find(c => c.id === rel.targetId);
-            prompt += `${index + 1}. ${source?.name || rel.sourceId} -> ${target?.name || rel.targetId} (${rel.type})\n`;
-            prompt += `   描述: ${rel.description}\n`;
-        });
-        
-        return prompt;
-    }
-
-    /**
-     * 构建验证提示
-     * @param design 架构设计
-     * @param requirements 需求列表
-     * @returns 提示字符串
-     */
-    private _buildValidationPrompt(design: ArchitectureDesign, requirements: any[]): string {
-        let prompt = `你是一名经验丰富的软件架构师，负责验证架构设计是否满足需求。
-请验证以下架构设计是否满足给定的需求列表。
-返回一个JSON对象，包含以下字段：
-- isValid: 布尔值，表示架构是否有效
-- issues: 问题数组，每个问题包含componentId/relationshipId, description, severity
-- requirementsCoverage: 需求覆盖率（0-1）
-
-只返回JSON对象，不要包含其他解释。\n\n`;
-        
-        prompt += `架构设计:\n`;
-        prompt += `名称: ${design.name}\n`;
-        prompt += `描述: ${design.description}\n`;
-        prompt += `类型: ${design.type}\n\n`;
-        
-        prompt += `组件:\n`;
-        design.components.forEach((component, index) => {
-            prompt += `${index + 1}. ${component.name} (${component.type})\n`;
-            prompt += `   ID: ${component.id}\n`;
-            prompt += `   描述: ${component.description}\n`;
-            prompt += `   职责: ${component.responsibilities.join(', ')}\n`;
-        });
-        
-        prompt += `\n关系:\n`;
-        design.relationships.forEach((rel, index) => {
-            const source = design.components.find(c => c.id === rel.sourceId);
-            const target = design.components.find(c => c.id === rel.targetId);
-            prompt += `${index + 1}. ${source?.name || rel.sourceId} -> ${target?.name || rel.targetId} (${rel.type})\n`;
-            prompt += `   ID: ${rel.id}\n`;
-            prompt += `   描述: ${rel.description}\n`;
-        });
-        
-        prompt += `\n需求列表:\n`;
-        requirements.forEach((req, index) => {
-            prompt += `${index + 1}. `;
-            if (typeof req === 'string') {
-                prompt += req + '\n';
-            } else if (req.title) {
-                prompt += `${req.title}\n`;
-                if (req.description) {
-                    prompt += `   描述: ${req.description}\n`;
-                }
-                if (req.priority) {
-                    prompt += `   优先级: ${req.priority}\n`;
-                }
-            }
-        });
-        
-        return prompt;
-    }
-
-    /**
-     * 解析架构类型
-     * @param typeStr 类型字符串
-     * @returns 架构类型
-     */
-    private _parseArchitectureType(typeStr: string): ArchitectureType {
-        if (!typeStr) {
-            return ArchitectureType.LAYERED;
-        }
-        
-        const normalizedType = typeStr.toLowerCase();
-        
-        switch (normalizedType) {
-            case 'monolithic':
-                return ArchitectureType.MONOLITHIC;
-            case 'microservices':
-                return ArchitectureType.MICROSERVICES;
-            case 'serverless':
-                return ArchitectureType.SERVERLESS;
-            case 'event_driven':
-            case 'event-driven':
-                return ArchitectureType.EVENT_DRIVEN;
-            case 'layered':
-                return ArchitectureType.LAYERED;
-            case 'modular':
-                return ArchitectureType.MODULAR;
-            default:
-                return ArchitectureType.CUSTOM;
-        }
-    }
-
-    /**
-     * 解析组件
-     * @param componentsData 组件数据
-     * @returns 组件数组
-     */
-    private _parseComponents(componentsData: any[]): ArchitectureComponent[] {
-        if (!Array.isArray(componentsData)) {
-            return [];
-        }
-        
-        return componentsData.map(data => {
-            return {
-                id: data.id || uuidv4(),
-                name: data.name || '未命名组件',
-                type: data.type || 'component',
-                description: data.description || '',
-                responsibilities: Array.isArray(data.responsibilities) ? data.responsibilities : [],
-                dependencies: Array.isArray(data.dependencies) ? data.dependencies : [],
-                technologies: Array.isArray(data.technologies) ? data.technologies : undefined,
-                interfaces: Array.isArray(data.interfaces) ? data.interfaces : undefined,
-                metadata: data.metadata
-            };
-        });
-    }
-
-    /**
-     * 解析关系
-     * @param relationshipsData 关系数据
-     * @returns 关系数组
-     */
-    private _parseRelationships(relationshipsData: any[]): ArchitectureRelationship[] {
-        if (!Array.isArray(relationshipsData)) {
-            return [];
-        }
-        
-        return relationshipsData.map(data => {
-            return {
-                id: data.id || uuidv4(),
-                sourceId: data.sourceId || '',
-                targetId: data.targetId || '',
-                type: data.type || 'depends-on',
-                description: data.description || '',
-                properties: data.properties
-            };
-        });
-    }
+  }
 }
