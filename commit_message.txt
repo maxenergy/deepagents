@@ -1,10 +1,1 @@
-[Cursor] 实现工作流模板和执行功能
-
-实现了以下功能：
-1. 创建 WorkflowTemplateFactory 类，用于创建预定义的工作流模板
-2. 创建 WorkflowExecutor 类，用于执行工作流
-3. 创建 WorkflowCommandHandler 类，用于处理 VSCode 命令
-4. 创建 WorkflowEngine 类，作为 WorkflowManager 的包装器，以便与现有代码兼容
-5. 更新 extension.ts 文件，将工作流相关的功能集成到扩展中
-
-这些更改完善了工作流管理功能，使用户能够创建、执行、暂停和停止工作流，以及使用预定义的工作流模板。 
+[Cursor] 添加 WorkflowCommandHandler 测试文件，但由于项目中存在大量类型错误，无法运行测试
