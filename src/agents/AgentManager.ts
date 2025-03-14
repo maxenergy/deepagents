@@ -303,6 +303,16 @@ export class AgentManager {
   }
 
   /**
+   * 获取指定角色的代理
+   * 
+   * @param role 代理角色
+   * @returns 指定角色的代理实例数组
+   */
+  public getAgentsByRole(role: AgentRole): IAgent[] {
+    return Array.from(this.agents.values()).filter(agent => agent.role === role);
+  }
+
+  /**
    * 移除代理
    * 
    * @param id 代理 ID

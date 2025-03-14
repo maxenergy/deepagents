@@ -1,12 +1,18 @@
 import * as vscode from 'vscode';
 import { ExtensionCore } from './core/ExtensionCore';
-import { StorageManager } from './storage/StorageManager';
+import { StorageManager, StorageNamespace } from './storage/StorageManager';
 import { LLMManager } from './llm/LLMManager';
 import { AgentManager } from './agents/AgentManager';
-import { WorkflowEngine } from './workflow/WorkflowEngine';
 import { UIManager } from './ui/UIManager';
 import { ToolManager } from './tools/ToolManager';
 import { LLMService } from './llm/LLMService';
+import { WorkflowManager } from './workflows/WorkflowManager';
+import { WorkflowEngine } from './workflows/WorkflowEngine';
+import { WorkflowCommandHandler } from './workflows/WorkflowCommandHandler';
+import { WorkflowsViewProvider } from './ui/providers/WorkflowsViewProvider';
+import { ProjectsViewProvider } from './ui/providers/ProjectsViewProvider';
+import { ProjectManager } from './projects/ProjectManager';
+import { UIComponentType } from './ui/IUIComponent';
 
 /**
  * DeepAgents 扩展激活函数
@@ -29,26 +35,80 @@ export async function activate(context: vscode.ExtensionContext) {
     const llmService = LLMService.getInstance();
     const toolManager = new ToolManager(context, outputChannel);
     const agentManager = new AgentManager(context, llmManager, storageManager, toolManager);
-    const workflowEngine = WorkflowEngine.getInstance();
-    const uiManager = new UIManager(context, storageManager, workflowEngine, agentManager, llmService);
+    const workflowManager = new WorkflowManager(storageManager);
+    const workflowEngine = WorkflowEngine.getInstance(workflowManager);
+    const projectManager = new ProjectManager(storageManager);
+    
+    // 创建 UI 管理器
+    // 注意：这里我们暂时不使用 UIManager，因为它需要 WorkflowEngine 类型，而我们现在使用的是自定义的 WorkflowEngine
+    // const uiManager = new UIManager(context, storageManager, workflowEngine, agentManager, llmService);
+
+    // 初始化工作流命令处理器
+    const workflowCommandHandler = new WorkflowCommandHandler(context, workflowManager, agentManager);
+
+    // 注册工作流视图提供器
+    const workflowsViewProvider = new WorkflowsViewProvider(context, workflowManager);
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(
+        WorkflowsViewProvider.viewType,
+        workflowsViewProvider
+      )
+    );
+
+    // 注册项目视图提供器
+    const projectsViewProvider = new ProjectsViewProvider(context, projectManager);
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(
+        ProjectsViewProvider.viewType,
+        projectsViewProvider
+      )
+    );
+
+    // 初始化 UI 组件
+    await workflowsViewProvider.initialize(context, {
+      id: 'workflows_view',
+      title: '工作流管理',
+      type: UIComponentType.WEBVIEW_VIEW
+    });
+
+    await projectsViewProvider.initialize(context, {
+      id: 'projects_view',
+      title: '项目管理',
+      type: UIComponentType.WEBVIEW_VIEW
+    });
 
     // 注册命令
     context.subscriptions.push(
       vscode.commands.registerCommand('deepagents.start', () => {
         outputChannel.appendLine('启动 DeepAgents');
-        uiManager.showComponent('main_panel');
+        // uiManager.showComponent('main_panel');
+        vscode.commands.executeCommand('deepagents.workflowsView.focus');
       })
     );
 
     context.subscriptions.push(
       vscode.commands.registerCommand('deepagents.showPanel', () => {
-        uiManager.showComponent('main_panel');
+        // uiManager.showComponent('main_panel');
+        vscode.commands.executeCommand('deepagents.workflowsView.focus');
       })
     );
 
     context.subscriptions.push(
       vscode.commands.registerCommand('deepagents.configure', () => {
-        uiManager.showComponent('config_panel');
+        // uiManager.showComponent('config_panel');
+        vscode.window.showInformationMessage('配置功能尚未实现');
+      })
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand('deepagents.showWorkflows', () => {
+        vscode.commands.executeCommand('deepagents.workflowsView.focus');
+      })
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand('deepagents.showProjects', () => {
+        vscode.commands.executeCommand('deepagents.projectsView.focus');
       })
     );
 
@@ -59,11 +119,12 @@ export async function activate(context: vscode.ExtensionContext) {
     return {
       extensionCore,
       agentManager,
-      workflowEngine,
+      workflowManager,
+      projectManager,
       llmManager,
       llmService,
-      toolManager,
-      uiManager
+      toolManager
+      // uiManager
     };
   } catch (error) {
     outputChannel.appendLine(`初始化失败: ${error}`);

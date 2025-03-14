@@ -1,6 +1,0 @@
-[Cursor] 实现工作流管理功能
-
-1. 创建 WorkflowsViewProvider 类，实现 IUIComponent 接口
-2. 创建 IWorkflow 接口和 WorkflowStatus 枚举
-3. 实现 WorkflowManager 类，提供工作流管理功能
-4. 添加工作流步骤管理功能 
