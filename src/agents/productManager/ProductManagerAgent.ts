@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { v4 as uuidv4 } from 'uuid';
-import { BaseAgent } from '../BaseAgent';
-import { AgentRole, AgentCapability, AgentState, AgentInput, AgentOutput, AgentAction, AgentConfig } from '../IAgent';
+import { AgentRole, AgentCapability, AgentState, AgentInput, AgentOutput, AgentAction, AgentConfig, IAgent } from '../IAgent';
 import { 
     IProductManagerAgent, 
     ProductManagerAgentConfig, 
@@ -16,31 +15,60 @@ import { LLMModelRole } from '../../llm/ILLMProvider';
 /**
  * 产品经理代理类，负责需求分析和产品规划
  */
-export class ProductManagerAgent extends BaseAgent implements IProductManagerAgent {
+export class ProductManagerAgent implements IProductManagerAgent {
+    public id: string;
+    public name: string;
+    public role: AgentRole;
+    public capabilities: AgentCapability[];
+    public state: AgentState;
+    
     private _requirements: Map<string, ProductRequirement>;
     private _specifications: Map<string, ProductSpecification>;
     private _llmService: LLMService;
-    protected _pmConfig: ProductManagerAgentConfig;
+    protected _config: ProductManagerAgentConfig;
 
     constructor() {
-        super();
+        this.id = `pm-${Date.now()}`;
+        this.name = '产品经理';
         this.role = AgentRole.PRODUCT_MANAGER;
         this.capabilities = [
             AgentCapability.REQUIREMENTS_ANALYSIS,
             AgentCapability.DOCUMENTATION
         ];
+        this.state = AgentState.IDLE;
         this._requirements = new Map<string, ProductRequirement>();
         this._specifications = new Map<string, ProductSpecification>();
         this._llmService = LLMService.getInstance();
-        this._pmConfig = {} as ProductManagerAgentConfig;
+        this._config = {} as ProductManagerAgentConfig;
     }
 
+    /**
+     * 初始化代理
+     * @param config 代理配置
+     */
+    public async initialize(config: AgentConfig): Promise<void> {
+        this.id = config.id || this.id;
+        this.name = config.name || this.name;
+        this.role = config.role || this.role;
+        this._config = config as ProductManagerAgentConfig;
+        
+        this.setState(AgentState.INITIALIZING);
+        
+        try {
+            await this.onInitialize();
+            this.setState(AgentState.IDLE);
+        } catch (error) {
+            console.error(`Error initializing agent ${this.id}:`, error);
+            this.setState(AgentState.ERROR);
+            throw error;
+        }
+    }
+    
     /**
      * 初始化回调
      */
     protected async onInitialize(): Promise<void> {
-        this._pmConfig = this._config as ProductManagerAgentConfig;
-        console.log(`ProductManagerAgent ${this.id} initialized with ${this._pmConfig.requirementTemplates?.length || 0} requirement templates.`);
+        console.log(`ProductManagerAgent ${this.id} initialized with ${this._config.requirementTemplates?.length || 0} requirement templates.`);
     }
 
     /**
@@ -49,50 +77,106 @@ export class ProductManagerAgent extends BaseAgent implements IProductManagerAge
      * @returns 代理输出
      */
     public async process(input: AgentInput): Promise<AgentOutput> {
-        const pmInput = input as ProductManagerAgentInput;
+        this.setState(AgentState.PROCESSING);
         
-        // 处理需求草稿
-        if (pmInput.requirementDraft) {
-            const requirement = await this.createRequirement(pmInput.requirementDraft);
-            return {
+        try {
+            const pmInput = input as ProductManagerAgentInput;
+            
+            // 处理需求草稿
+            if (pmInput.requirementDraft) {
+                const requirement = await this.createRequirement(pmInput.requirementDraft);
+                const output = {
+                    agentId: this.id,
+                    timestamp: new Date(),
+                    status: 'success',
+                    message: `已创建需求: ${requirement.title}`,
+                    response: `已创建需求: ${requirement.title}`,
+                    actions: [{
+                        type: 'requirement_created',
+                        payload: requirement
+                    }],
+                    requirements: [requirement]
+                } as ProductManagerAgentOutput;
+                
+                this.setState(AgentState.IDLE);
+                return output;
+            }
+            
+            // 处理现有需求分析
+            if (pmInput.existingRequirements && pmInput.existingRequirements.length > 0) {
+                const analysis = await this.analyzeRequirements(pmInput.existingRequirements);
+                const prioritizedRequirements = await this.prioritizeRequirements(pmInput.existingRequirements);
+                
+                const output = {
+                    agentId: this.id,
+                    timestamp: new Date(),
+                    status: 'success',
+                    message: '需求分析完成',
+                    response: analysis,
+                    actions: [{
+                        type: 'requirements_analyzed',
+                        payload: {
+                            analysis,
+                            prioritizedRequirements
+                        }
+                    }],
+                    requirements: prioritizedRequirements,
+                    analysis
+                } as ProductManagerAgentOutput;
+                
+                this.setState(AgentState.IDLE);
+                return output;
+            }
+            
+            // 默认处理
+            const output: AgentOutput = {
                 agentId: this.id,
                 timestamp: new Date(),
                 status: 'success',
-                message: `已创建需求: ${requirement.title}`,
-                response: `已创建需求: ${requirement.title}`,
-                actions: [{
-                    type: 'requirement_created',
-                    payload: requirement
-                }],
-                requirements: [requirement]
-            } as ProductManagerAgentOutput;
-        }
-        
-        // 处理现有需求分析
-        if (pmInput.existingRequirements && pmInput.existingRequirements.length > 0) {
-            const analysis = await this.analyzeRequirements(pmInput.existingRequirements);
-            const prioritizedRequirements = await this.prioritizeRequirements(pmInput.existingRequirements);
+                message: '处理完成',
+                response: '已处理输入，但没有特定操作。'
+            };
+            
+            this.setState(AgentState.IDLE);
+            return output;
+        } catch (error: any) {
+            console.error(`Error processing input for agent ${this.id}:`, error);
+            this.setState(AgentState.ERROR);
             
             return {
                 agentId: this.id,
                 timestamp: new Date(),
-                status: 'success',
-                message: '需求分析完成',
-                response: analysis,
-                actions: [{
-                    type: 'requirements_analyzed',
-                    payload: {
-                        analysis,
-                        prioritizedRequirements
-                    }
-                }],
-                requirements: prioritizedRequirements,
-                analysis
-            } as ProductManagerAgentOutput;
+                status: 'error',
+                message: `处理错误: ${error.message}`,
+                error: error.message
+            };
         }
+    }
+
+    /**
+     * 与其他代理协作
+     * @param agents 协作代理数组
+     */
+    public async collaborate(agents: IAgent[]): Promise<void> {
+        console.log(`ProductManagerAgent ${this.id} collaborating with ${agents.length} agents.`);
         
-        // 默认处理
-        return await super.process(input);
+        // 这里实现与其他代理的协作逻辑
+    }
+
+    /**
+     * 获取代理状态
+     * @returns 代理状态
+     */
+    public getState(): AgentState {
+        return this.state;
+    }
+
+    /**
+     * 设置代理状态
+     * @param state 代理状态
+     */
+    public setState(state: AgentState): void {
+        this.state = state;
     }
 
     /**
@@ -103,10 +187,10 @@ export class ProductManagerAgent extends BaseAgent implements IProductManagerAge
     protected async callLLM(prompt: string): Promise<string> {
         try {
             const response = await this._llmService.sendRequest({
-                model: this._pmConfig.model || 'gpt-4',
+                model: this._config.model || 'gpt-4',
                 messages: [{ role: LLMModelRole.USER, content: prompt }],
-                temperature: this._pmConfig.temperature || 0.7,
-                maxTokens: this._pmConfig.maxTokens || 2000
+                temperature: this._config.temperature || 0.7,
+                maxTokens: this._config.maxTokens || 2000
             });
             
             return response.content || '';
@@ -459,8 +543,8 @@ export class ProductManagerAgent extends BaseAgent implements IProductManagerAge
         let prompt = '';
         
         // 使用模板（如果有）
-        if (this._pmConfig.requirementTemplates && this._pmConfig.requirementTemplates.length > 0) {
-            prompt += this._pmConfig.requirementTemplates[0] + '\n\n';
+        if (this._config.requirementTemplates && this._config.requirementTemplates.length > 0) {
+            prompt += this._config.requirementTemplates[0] + '\n\n';
         } else {
             prompt += `你是一名经验丰富的产品经理，负责分析和完善产品需求。
 请根据以下需求草稿，创建一个结构化的需求文档。
@@ -487,8 +571,8 @@ export class ProductManagerAgent extends BaseAgent implements IProductManagerAge
         let prompt = '';
         
         // 使用模板（如果有）
-        if (this._pmConfig.specificationTemplates && this._pmConfig.specificationTemplates.length > 0) {
-            prompt += this._pmConfig.specificationTemplates[0] + '\n\n';
+        if (this._config.specificationTemplates && this._config.specificationTemplates.length > 0) {
+            prompt += this._config.specificationTemplates[0] + '\n\n';
         } else {
             prompt += `你是一名经验丰富的产品经理，负责创建产品规格文档。
 请根据以下需求列表，创建一个完整的产品规格文档。
@@ -521,8 +605,8 @@ export class ProductManagerAgent extends BaseAgent implements IProductManagerAge
         let prompt = '';
         
         // 使用模板（如果有）
-        if (this._pmConfig.analysisPrompts && this._pmConfig.analysisPrompts.length > 0) {
-            prompt += this._pmConfig.analysisPrompts[0] + '\n\n';
+        if (this._config.analysisPrompts && this._config.analysisPrompts.length > 0) {
+            prompt += this._config.analysisPrompts[0] + '\n\n';
         } else {
             prompt += `你是一名经验丰富的产品经理，负责分析产品需求。
 请对以下需求列表进行全面分析，包括：
@@ -556,8 +640,8 @@ export class ProductManagerAgent extends BaseAgent implements IProductManagerAge
         let prompt = '';
         
         // 使用策略（如果有）
-        if (this._pmConfig.prioritizationStrategy) {
-            prompt += `${this._pmConfig.prioritizationStrategy}\n\n`;
+        if (this._config.prioritizationStrategy) {
+            prompt += `${this._config.prioritizationStrategy}\n\n`;
         } else {
             prompt += `你是一名经验丰富的产品经理，负责对产品需求进行优先级排序。
 请根据以下标准对需求进行排序：
