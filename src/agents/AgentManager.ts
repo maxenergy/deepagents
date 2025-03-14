@@ -6,6 +6,8 @@ import { ProductManagerAgent } from './ProductManagerAgent';
 import { ArchitectAgent } from './ArchitectAgent';
 import { DeveloperAgent } from './DeveloperAgent';
 import { TesterAgent } from './TesterAgent';
+import { DevOpsAgent } from './DevOpsAgent';
+import { DocumentationAgent } from './DocumentationAgent';
 
 /**
  * 代理角色枚举
@@ -145,6 +147,16 @@ export class AgentManager {
   private storageManager: StorageManager;
   private toolManager: ToolManager;
   private agents: Map<string, IAgent> = new Map();
+  
+  // 事件发射器
+  private _onAgentCreated = new vscode.EventEmitter<IAgent>();
+  private _onAgentRemoved = new vscode.EventEmitter<string>();
+  private _onAgentStateChanged = new vscode.EventEmitter<IAgent>();
+  
+  // 事件
+  public readonly onAgentCreated = this._onAgentCreated.event;
+  public readonly onAgentRemoved = this._onAgentRemoved.event;
+  public readonly onAgentStateChanged = this._onAgentStateChanged.event;
 
   /**
    * 构造函数
@@ -210,6 +222,14 @@ export class AgentManager {
         agent = new TesterAgent(id, this.llmManager, this.toolManager);
         break;
       
+      case AgentRole.DEVOPS:
+        agent = new DevOpsAgent(id, this.llmManager, this.toolManager);
+        break;
+      
+      case AgentRole.DOCUMENTATION:
+        agent = new DocumentationAgent(id, this.llmManager, this.toolManager);
+        break;
+      
       default:
         // 创建一个基本的代理实例
         agent = {
@@ -257,6 +277,9 @@ export class AgentManager {
       await agentStorage.set(agent.id, config);
     }
     
+    // 触发代理创建事件
+    this._onAgentCreated.fire(agent);
+    
     return agent;
   }
 
@@ -294,6 +317,9 @@ export class AgentManager {
       if (agentStorage) {
         await agentStorage.delete(id);
       }
+      
+      // 触发代理移除事件
+      this._onAgentRemoved.fire(id);
     }
     
     return result;
@@ -323,6 +349,9 @@ export class AgentManager {
       // 设置代理状态
       agent.setState(AgentState.BUSY);
       
+      // 触发代理状态变更事件
+      this._onAgentStateChanged.fire(agent);
+      
       // 处理任务
       const output = await agent.process({
         message: task.description,
@@ -336,6 +365,9 @@ export class AgentManager {
       // 恢复代理状态
       agent.setState(AgentState.IDLE);
       
+      // 触发代理状态变更事件
+      this._onAgentStateChanged.fire(agent);
+      
       return {
         task,
         success: !output.error,
@@ -346,11 +378,33 @@ export class AgentManager {
       // 恢复代理状态
       agent.setState(AgentState.ERROR);
       
+      // 触发代理状态变更事件
+      this._onAgentStateChanged.fire(agent);
+      
       return {
         task,
         success: false,
         error: error instanceof Error ? error.message : String(error)
       };
     }
+  }
+  
+  /**
+   * 检查代理是否处于活动状态
+   * 
+   * @param agent 代理实例
+   * @returns 是否处于活动状态
+   */
+  public isAgentActive(agent: IAgent): boolean {
+    return agent.state === AgentState.BUSY;
+  }
+  
+  /**
+   * 销毁代理管理器
+   */
+  public dispose(): void {
+    this._onAgentCreated.dispose();
+    this._onAgentRemoved.dispose();
+    this._onAgentStateChanged.dispose();
   }
 }
