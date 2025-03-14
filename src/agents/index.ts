@@ -25,3 +25,6 @@ export { DeveloperAgent } from './DeveloperAgent';
 export { TesterAgent } from './TesterAgent';
 export { DevOpsAgent } from './DevOpsAgent';
 export { DocumentationAgent } from './DocumentationAgent';
+
+// 导出协作模块
+export * from './collaboration';
