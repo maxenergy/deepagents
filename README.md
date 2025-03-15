@@ -62,6 +62,38 @@ DeepAgents 是一个基于大型语言模型（LLM）的多代理自动化开发
 4. 启动调试
    在 VSCode 中，按下 `F5` 启动调试
 
+### 打包和发布
+
+1. 使用提供的脚本打包扩展
+   ```
+   ./scripts/publish.sh --package
+   ```
+
+2. 发布到 VSCode 扩展市场
+   ```
+   ./scripts/publish.sh
+   ```
+
+   注意：发布前需要登录到 VSCode 扩展市场
+   ```
+   npx vsce login <publisher>
+   ```
+
+3. 指定版本号
+   ```
+   ./scripts/publish.sh --version 0.1.1
+   ```
+
+## 贡献
+
+欢迎贡献代码、报告问题或提出改进建议。请遵循以下步骤：
+
+1. Fork 仓库
+2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
+3. 提交更改 (`git commit -m 'Add some amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 创建 Pull Request
+
 ## 许可证
 
-MIT
+ISC
