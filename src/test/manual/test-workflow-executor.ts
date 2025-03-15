@@ -25,364 +25,296 @@ const vscode = {
             console.log(`[REGISTER_COMMAND] ${command}`);
             return { dispose: () => {} };
         }
+    },
+    EventEmitter: class {
+        private listeners: Array<(e: any) => any> = [];
+        
+        public event = (listener: (e: any) => any) => {
+            this.listeners.push(listener);
+            return { dispose: () => {} };
+        };
+        
+        public fire(data: any) {
+            this.listeners.forEach(listener => listener(data));
+        }
+    },
+    Uri: {
+        file: (path: string) => {
+            return { fsPath: path };
+        }
     }
 };
 
 // 使用 mock-require 模拟 vscode 模块
 mockRequire('vscode', vscode);
 
-// 模拟 IWorkflow 接口
-interface IWorkflow {
-    id: string;
-    name: string;
-    description: string;
-    type: string;
-    config: any;
-    status: string;
-    steps: any[];
-    start(): Promise<void>;
-    pause(): Promise<void>;
-    stop(): Promise<void>;
-    getCurrentStep(): any | null;
-    moveToNextStep(): boolean;
-    isCompleted(): boolean;
-}
-
-// 模拟 WorkflowStatus 枚举
-const WorkflowStatus = {
-    IDLE: 'idle',
-    RUNNING: 'running',
-    PAUSED: 'paused',
-    COMPLETED: 'completed',
-    ERROR: 'error',
-    STOPPED: 'stopped'
-};
-
 // 模拟 WorkflowManager 类
 class MockWorkflowManager {
-    private workflows: Map<string, IWorkflow> = new Map();
+    private workflows: Map<string, any> = new Map();
+    private currentStepIndex: Map<string, number> = new Map();
 
     constructor() {
         console.log('创建 MockWorkflowManager 实例');
     }
 
-    async getWorkflow(id: string): Promise<IWorkflow | null> {
+    async createWorkflow(name: string, config: any): Promise<any> {
+        console.log(`创建工作流: ${name}`);
+        const id = `workflow-${Math.random().toString(36).substring(2, 9)}`;
+        const workflow = {
+            id,
+            name,
+            description: config.description,
+            type: config.type,
+            config,
+            status: 'idle',
+            steps: [],
+            currentStepIndex: 0,
+            getCurrentStep: () => {
+                const index = this.currentStepIndex.get(id) || 0;
+                return workflow.steps[index] || null;
+            },
+            start: async () => {
+                console.log(`启动工作流: ${name}`);
+                workflow.status = 'running';
+                return workflow;
+            },
+            pause: async () => {
+                console.log(`暂停工作流: ${name}`);
+                workflow.status = 'paused';
+                return workflow;
+            },
+            stop: async () => {
+                console.log(`停止工作流: ${name}`);
+                workflow.status = 'stopped';
+                return workflow;
+            }
+        };
+        
+        this.workflows.set(id, workflow);
+        this.currentStepIndex.set(id, 0);
+        return workflow;
+    }
+
+    async getWorkflow(id: string): Promise<any | null> {
         console.log(`获取工作流: ${id}`);
         return this.workflows.get(id) || null;
     }
 
-    async updateWorkflow(id: string, config: any): Promise<void> {
+    async getAllWorkflows(): Promise<any[]> {
+        console.log('获取所有工作流');
+        return Array.from(this.workflows.values());
+    }
+
+    async updateWorkflow(id: string, config: any): Promise<any> {
         console.log(`更新工作流: ${id}`);
         const workflow = this.workflows.get(id);
         if (workflow) {
+            workflow.name = config.name;
+            workflow.description = config.description;
             workflow.config = config;
         }
+        return workflow;
     }
 
-    // 添加工作流（用于测试）
-    addWorkflow(workflow: IWorkflow): void {
-        console.log(`添加工作流: ${workflow.id} - ${workflow.name}`);
-        this.workflows.set(workflow.id, workflow);
-    }
-}
-
-// 模拟工作流步骤
-class MockWorkflowStep {
-    public active: boolean = false;
-    public completed: boolean = false;
-    
-    constructor(
-        public name: string,
-        public description: string,
-        private shouldFail: boolean = false,
-        private executionDelay: number = 100
-    ) {}
-
-    async execute(): Promise<any> {
-        console.log(`执行步骤: ${this.name}`);
-        
-        // 模拟异步执行
-        return new Promise((resolve, reject) => {
-            setTimeout(() => {
-                if (this.shouldFail) {
-                    console.log(`步骤执行失败: ${this.name}`);
-                    reject(new Error(`步骤执行失败: ${this.name}`));
-                } else {
-                    console.log(`步骤执行成功: ${this.name}`);
-                    resolve({ status: 'success', message: `步骤 ${this.name} 执行成功` });
-                }
-            }, this.executionDelay);
-        });
-    }
-}
-
-// 模拟工作流
-class MockWorkflow implements IWorkflow {
-    public status: string = WorkflowStatus.IDLE;
-    private currentStepIndex: number = 0;
-
-    constructor(
-        public id: string,
-        public name: string,
-        public description: string,
-        public type: string,
-        public config: any,
-        public steps: MockWorkflowStep[]
-    ) {}
-
-    async start(): Promise<void> {
-        console.log(`启动工作流: ${this.name}`);
-        this.status = WorkflowStatus.RUNNING;
+    async removeWorkflow(id: string): Promise<boolean> {
+        console.log(`删除工作流: ${id}`);
+        this.currentStepIndex.delete(id);
+        return this.workflows.delete(id);
     }
 
-    async pause(): Promise<void> {
-        console.log(`暂停工作流: ${this.name}`);
-        this.status = WorkflowStatus.PAUSED;
+    async addWorkflowStep(id: string, step: any): Promise<any> {
+        console.log(`添加工作流步骤: ${id} - ${step.name}`);
+        const workflow = this.workflows.get(id);
+        if (workflow) {
+            workflow.steps.push(step);
+        }
+        return workflow;
     }
 
-    async stop(): Promise<void> {
-        console.log(`停止工作流: ${this.name}`);
-        this.status = WorkflowStatus.STOPPED;
+    async startWorkflow(id: string): Promise<any> {
+        console.log(`启动工作流: ${id}`);
+        const workflow = this.workflows.get(id);
+        if (workflow) {
+            await workflow.start();
+        }
+        return workflow;
     }
 
-    getCurrentStep(): MockWorkflowStep | null {
-        if (this.currentStepIndex >= this.steps.length) {
+    async pauseWorkflow(id: string): Promise<any> {
+        console.log(`暂停工作流: ${id}`);
+        const workflow = this.workflows.get(id);
+        if (workflow) {
+            await workflow.pause();
+        }
+        return workflow;
+    }
+
+    async stopWorkflow(id: string): Promise<any> {
+        console.log(`停止工作流: ${id}`);
+        const workflow = this.workflows.get(id);
+        if (workflow) {
+            await workflow.stop();
+        }
+        return workflow;
+    }
+
+    async executeCurrentStep(id: string): Promise<any> {
+        console.log(`执行当前步骤: ${id}`);
+        const workflow = this.workflows.get(id);
+        if (!workflow) {
             return null;
         }
-        return this.steps[this.currentStepIndex];
-    }
 
-    moveToNextStep(): boolean {
-        if (this.currentStepIndex < this.steps.length - 1) {
-            this.currentStepIndex++;
-            console.log(`移动到下一步骤: ${this.steps[this.currentStepIndex].name}`);
-            return true;
+        const currentIndex = this.currentStepIndex.get(id) || 0;
+        const currentStep = workflow.steps[currentIndex];
+        
+        if (!currentStep) {
+            console.log(`没有找到当前步骤: ${id} - ${currentIndex}`);
+            return null;
         }
-        console.log(`已到达最后一个步骤，无法继续移动`);
-        return false;
+
+        console.log(`执行步骤: ${currentStep.name}`);
+        const result = await currentStep.execute();
+        
+        // 执行成功后，移动到下一步
+        this.currentStepIndex.set(id, currentIndex + 1);
+        
+        return result;
     }
 
-    isCompleted(): boolean {
-        return this.currentStepIndex >= this.steps.length;
+    async retryCurrentStep(id: string): Promise<any> {
+        console.log(`重试当前步骤: ${id}`);
+        const workflow = this.workflows.get(id);
+        if (!workflow) {
+            return null;
+        }
+
+        const currentIndex = this.currentStepIndex.get(id) || 0;
+        const currentStep = workflow.steps[currentIndex];
+        
+        if (!currentStep) {
+            console.log(`没有找到当前步骤: ${id} - ${currentIndex}`);
+            return null;
+        }
+
+        console.log(`重试步骤: ${currentStep.name}`);
+        return await currentStep.execute();
+    }
+
+    async skipCurrentStep(id: string): Promise<any> {
+        console.log(`跳过当前步骤: ${id}`);
+        const workflow = this.workflows.get(id);
+        if (!workflow) {
+            return null;
+        }
+
+        const currentIndex = this.currentStepIndex.get(id) || 0;
+        
+        // 跳过当前步骤，移动到下一步
+        this.currentStepIndex.set(id, currentIndex + 1);
+        
+        return workflow;
     }
 }
 
-// 修改 WorkflowExecutor 类的实现，避免无限循环
-class MockWorkflowExecutor {
-    private runningWorkflows: Map<string, NodeJS.Timeout> = new Map();
+// 模拟 AgentManager 类
+class MockAgentManager {
+    private agents: Map<string, any> = new Map();
 
-    constructor(private workflowManager: MockWorkflowManager) {}
-
-    async executeWorkflow(workflowId: string): Promise<void> {
-        // 获取工作流
-        const workflow = await this.workflowManager.getWorkflow(workflowId);
-        if (!workflow) {
-            throw new Error(`未找到工作流: ${workflowId}`);
-        }
-
-        // 检查工作流状态
-        if (workflow.status === WorkflowStatus.RUNNING) {
-            throw new Error(`工作流已在运行中: ${workflow.name}`);
-        }
-
-        // 启动工作流
-        await workflow.start();
-        await this.workflowManager.updateWorkflow(workflowId, workflow.config);
-
-        // 显示通知
-        vscode.window.showInformationMessage(`开始执行工作流: ${workflow.name}`);
-
-        // 执行工作流步骤
-        this.executeWorkflowSteps(workflow);
+    constructor() {
+        console.log('创建 MockAgentManager 实例');
     }
 
-    async pauseWorkflow(workflowId: string): Promise<void> {
-        // 获取工作流
-        const workflow = await this.workflowManager.getWorkflow(workflowId);
-        if (!workflow) {
-            throw new Error(`未找到工作流: ${workflowId}`);
-        }
-
-        // 检查工作流状态
-        if (workflow.status !== WorkflowStatus.RUNNING) {
-            throw new Error(`工作流未在运行中: ${workflow.name}`);
-        }
-
-        // 暂停工作流
-        await workflow.pause();
-        await this.workflowManager.updateWorkflow(workflowId, workflow.config);
-
-        // 清除定时器
-        const timer = this.runningWorkflows.get(workflowId);
-        if (timer) {
-            clearTimeout(timer);
-            this.runningWorkflows.delete(workflowId);
-        }
-
-        // 显示通知
-        vscode.window.showInformationMessage(`已暂停工作流: ${workflow.name}`);
-    }
-
-    async stopWorkflow(workflowId: string): Promise<void> {
-        // 获取工作流
-        const workflow = await this.workflowManager.getWorkflow(workflowId);
-        if (!workflow) {
-            throw new Error(`未找到工作流: ${workflowId}`);
-        }
-
-        // 检查工作流状态
-        if (workflow.status !== WorkflowStatus.RUNNING && workflow.status !== WorkflowStatus.PAUSED) {
-            throw new Error(`工作流未在运行或暂停中: ${workflow.name}`);
-        }
-
-        // 停止工作流
-        await workflow.stop();
-        await this.workflowManager.updateWorkflow(workflowId, workflow.config);
-
-        // 清除定时器
-        const timer = this.runningWorkflows.get(workflowId);
-        if (timer) {
-            clearTimeout(timer);
-            this.runningWorkflows.delete(workflowId);
-        }
-
-        // 显示通知
-        vscode.window.showInformationMessage(`已停止工作流: ${workflow.name}`);
-    }
-
-    private async executeWorkflowSteps(workflow: IWorkflow): Promise<void> {
-        // 获取当前步骤
-        const currentStep = workflow.getCurrentStep();
-        if (!currentStep) {
-            // 所有步骤已完成
-            workflow.status = WorkflowStatus.COMPLETED;
-            await this.workflowManager.updateWorkflow(workflow.id, workflow.config);
-            
-            // 显示通知
-            vscode.window.showInformationMessage(`工作流已完成: ${workflow.name}`);
-            return;
-        }
-
-        try {
-            // 标记步骤为活动状态
-            currentStep.active = true;
-            await this.workflowManager.updateWorkflow(workflow.id, workflow.config);
-
-            // 执行步骤
-            const result = await currentStep.execute();
-
-            // 标记步骤为已完成
-            currentStep.active = false;
-            currentStep.completed = true;
-            await this.workflowManager.updateWorkflow(workflow.id, workflow.config);
-
-            // 移动到下一步骤
-            workflow.moveToNextStep();
-
-            // 检查工作流状态
-            if (workflow.status === WorkflowStatus.RUNNING) {
-                // 设置定时器执行下一步骤
-                const timer = setTimeout(() => {
-                    this.executeWorkflowSteps(workflow);
-                }, 1000);
-                
-                // 保存定时器
-                this.runningWorkflows.set(workflow.id, timer);
+    async getAgentByRole(role: string): Promise<any> {
+        console.log(`获取代理: ${role}`);
+        return {
+            id: `agent-${Math.random().toString(36).substring(2, 9)}`,
+            name: `${role} Agent`,
+            role: role,
+            processRequest: async (input: any) => {
+                console.log(`处理请求: ${JSON.stringify(input)}`);
+                return {
+                    agentId: `agent-${Math.random().toString(36).substring(2, 9)}`,
+                    timestamp: new Date().toISOString(),
+                    status: 'success',
+                    message: `处理成功: ${input.message || '无消息'}`,
+                    response: `响应: ${input.message || '无消息'}`,
+                    actions: [],
+                    metadata: {}
+                };
             }
-        } catch (error: unknown) {
-            // 标记步骤为非活动状态
-            currentStep.active = false;
-            await this.workflowManager.updateWorkflow(workflow.id, workflow.config);
+        };
+    }
+}
 
-            // 检查是否继续执行
-            if (workflow.config.settings?.continueOnError) {
-                // 移动到下一步骤
-                workflow.moveToNextStep();
-                
-                // 设置定时器执行下一步骤
-                const timer = setTimeout(() => {
-                    this.executeWorkflowSteps(workflow);
-                }, 1000);
-                
-                // 保存定时器
-                this.runningWorkflows.set(workflow.id, timer);
-            } else {
-                // 停止工作流
-                workflow.status = WorkflowStatus.ERROR;
-                await this.workflowManager.updateWorkflow(workflow.id, workflow.config);
-                
-                // 显示错误通知
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`工作流执行错误: ${workflow.name} - ${errorMessage}`);
+// 模拟 WorkflowStepFactory 类
+class MockWorkflowStepFactory {
+    constructor(private agentManager: MockAgentManager) {
+        console.log('创建 MockWorkflowStepFactory 实例');
+    }
+
+    async createRequirementsAnalysisStep(name: string, description: string, inputData: any): Promise<any> {
+        console.log(`创建需求分析步骤: ${name}`);
+        const agent = await this.agentManager.getAgentByRole('PRODUCT_MANAGER');
+        return {
+            id: `step-${Math.random().toString(36).substring(2, 9)}`,
+            name,
+            description,
+            agent,
+            inputData,
+            execute: async () => {
+                console.log(`执行步骤: ${name}`);
+                return await agent.processRequest(inputData);
             }
-        }
+        };
     }
 
-    async retryCurrentStep(workflowId: string): Promise<void> {
-        // 获取工作流
-        const workflow = await this.workflowManager.getWorkflow(workflowId);
-        if (!workflow) {
-            throw new Error(`未找到工作流: ${workflowId}`);
-        }
-
-        // 检查工作流状态
-        if (workflow.status !== WorkflowStatus.ERROR) {
-            throw new Error(`工作流未处于错误状态: ${workflow.name}`);
-        }
-
-        // 获取当前步骤
-        const currentStep = workflow.getCurrentStep();
-        if (!currentStep) {
-            throw new Error(`未找到当前步骤: ${workflow.name}`);
-        }
-
-        // 重置当前步骤状态
-        currentStep.completed = false;
-        currentStep.active = false;
-        
-        // 重置工作流状态
-        workflow.status = WorkflowStatus.IDLE;
-        
-        // 更新工作流
-        await this.workflowManager.updateWorkflow(workflowId, workflow.config);
-
-        // 执行工作流
-        await this.executeWorkflow(workflow.id);
+    async createArchitectureDesignStep(name: string, description: string, inputData: any): Promise<any> {
+        console.log(`创建架构设计步骤: ${name}`);
+        const agent = await this.agentManager.getAgentByRole('ARCHITECT');
+        return {
+            id: `step-${Math.random().toString(36).substring(2, 9)}`,
+            name,
+            description,
+            agent,
+            inputData,
+            execute: async () => {
+                console.log(`执行步骤: ${name}`);
+                return await agent.processRequest(inputData);
+            }
+        };
     }
 
-    async skipCurrentStep(workflowId: string): Promise<void> {
-        // 获取工作流
-        const workflow = await this.workflowManager.getWorkflow(workflowId);
-        if (!workflow) {
-            throw new Error(`未找到工作流: ${workflowId}`);
-        }
+    async createCodeGenerationStep(name: string, description: string, inputData: any): Promise<any> {
+        console.log(`创建代码生成步骤: ${name}`);
+        const agent = await this.agentManager.getAgentByRole('DEVELOPER');
+        return {
+            id: `step-${Math.random().toString(36).substring(2, 9)}`,
+            name,
+            description,
+            agent,
+            inputData,
+            execute: async () => {
+                console.log(`执行步骤: ${name}`);
+                return await agent.processRequest(inputData);
+            }
+        };
+    }
 
-        // 检查工作流状态
-        if (workflow.status !== WorkflowStatus.ERROR && workflow.status !== WorkflowStatus.PAUSED) {
-            throw new Error(`工作流未处于错误或暂停状态: ${workflow.name}`);
-        }
-
-        // 获取当前步骤
-        const currentStep = workflow.getCurrentStep();
-        if (!currentStep) {
-            throw new Error(`未找到当前步骤: ${workflow.name}`);
-        }
-
-        // 标记当前步骤为已完成
-        currentStep.completed = true;
-        currentStep.active = false;
-        
-        // 移动到下一步骤
-        workflow.moveToNextStep();
-        
-        // 重置工作流状态
-        workflow.status = WorkflowStatus.IDLE;
-        
-        // 更新工作流
-        await this.workflowManager.updateWorkflow(workflowId, workflow.config);
-
-        // 执行工作流
-        await this.executeWorkflow(workflow.id);
+    async createErrorStep(name: string, description: string, inputData: any): Promise<any> {
+        console.log(`创建错误步骤: ${name}`);
+        const agent = await this.agentManager.getAgentByRole('DEVELOPER');
+        return {
+            id: `step-${Math.random().toString(36).substring(2, 9)}`,
+            name,
+            description,
+            agent,
+            inputData,
+            execute: async () => {
+                console.log(`执行步骤: ${name} - 模拟错误`);
+                throw new Error('模拟步骤执行错误');
+            }
+        };
     }
 }
 
@@ -391,127 +323,171 @@ async function runTest() {
     try {
         console.log('准备测试 WorkflowExecutor...');
         
-        // 创建 MockWorkflowManager 实例
+        // 检查文件是否存在
+        const filePath = path.resolve(__dirname, '../../workflows/WorkflowExecutor.ts');
+        if (!fs.existsSync(filePath)) {
+            console.error(`文件不存在: ${filePath}`);
+            const tsFilePath = path.resolve(__dirname, '../../workflows/WorkflowExecutor.ts');
+            if (fs.existsSync(tsFilePath)) {
+                console.error(`找到 TypeScript 文件: ${tsFilePath}`);
+                console.error('请先编译 TypeScript 文件');
+            }
+            process.exit(1);
+        }
+        
+        // 动态导入 WorkflowExecutor 类
+        const { WorkflowExecutor } = await import('../../workflows/WorkflowExecutor');
+        
+        // 创建模拟实例
         const workflowManager = new MockWorkflowManager();
+        const agentManager = new MockAgentManager();
+        const workflowStepFactory = new MockWorkflowStepFactory(agentManager);
         
-        // 创建 MockWorkflowExecutor 实例
-        const workflowExecutor = new MockWorkflowExecutor(workflowManager);
+        // 创建 WorkflowExecutor 实例
+        const workflowExecutor = new WorkflowExecutor(workflowManager as any);
         
-        // 创建测试工作流
-        const workflow1 = new MockWorkflow(
-            'workflow-1',
-            '测试工作流 1',
-            '用于测试的工作流',
-            'test',
-            { settings: { continueOnError: false } },
-            [
-                new MockWorkflowStep('步骤 1', '第一个步骤', false, 500),
-                new MockWorkflowStep('步骤 2', '第二个步骤', false, 500),
-                new MockWorkflowStep('步骤 3', '第三个步骤', false, 500)
-            ]
+        // 测试创建工作流
+        console.log('\n测试创建工作流...');
+        const workflow1 = await workflowManager.createWorkflow('测试工作流', {
+            name: '测试工作流',
+            description: '用于测试的工作流',
+            type: 'test',
+            settings: { 
+                continueOnError: false 
+            },
+            inputData: { 
+                description: '这是一个测试项目' 
+            }
+        });
+        
+        console.log(`创建的工作流: ${workflow1.id} - ${workflow1.name}`);
+        
+        // 添加步骤
+        console.log('\n测试添加步骤...');
+        const step1 = await workflowStepFactory.createRequirementsAnalysisStep(
+            '需求分析',
+            '分析项目需求',
+            { message: '分析项目需求' }
         );
         
-        // 添加工作流到管理器
-        workflowManager.addWorkflow(workflow1);
+        const step2 = await workflowStepFactory.createArchitectureDesignStep(
+            '架构设计',
+            '设计系统架构',
+            { message: '设计系统架构' }
+        );
+        
+        const step3 = await workflowStepFactory.createCodeGenerationStep(
+            '代码生成',
+            '生成代码',
+            { message: '生成代码' }
+        );
+        
+        await workflowManager.addWorkflowStep(workflow1.id, step1);
+        await workflowManager.addWorkflowStep(workflow1.id, step2);
+        await workflowManager.addWorkflowStep(workflow1.id, step3);
         
         // 测试执行工作流
         console.log('\n测试执行工作流...');
-        await workflowExecutor.executeWorkflow('workflow-1');
+        await workflowExecutor.executeWorkflow(workflow1.id);
         
         // 等待一段时间，让工作流执行
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         // 测试暂停工作流
         console.log('\n测试暂停工作流...');
-        await workflowExecutor.pauseWorkflow('workflow-1');
+        await workflowExecutor.pauseWorkflow(workflow1.id);
         
         // 等待一段时间
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         // 测试继续执行工作流
         console.log('\n测试继续执行工作流...');
-        await workflowExecutor.executeWorkflow('workflow-1');
+        await workflowExecutor.executeWorkflow(workflow1.id);
         
         // 等待一段时间
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         // 测试停止工作流
         console.log('\n测试停止工作流...');
-        await workflowExecutor.stopWorkflow('workflow-1');
+        await workflowExecutor.stopWorkflow(workflow1.id);
         
-        // 创建一个会失败的工作流
-        const workflow2 = new MockWorkflow(
-            'workflow-2',
-            '测试工作流 2（会失败）',
-            '用于测试失败处理的工作流',
-            'test',
-            { settings: { continueOnError: false } },
-            [
-                new MockWorkflowStep('步骤 1', '第一个步骤', false, 500),
-                new MockWorkflowStep('步骤 2', '第二个步骤（会失败）', true, 500),
-                new MockWorkflowStep('步骤 3', '第三个步骤', false, 500)
-            ]
+        // 创建一个包含错误步骤的工作流
+        console.log('\n测试创建包含错误步骤的工作流...');
+        const workflow2 = await workflowManager.createWorkflow('错误测试工作流', {
+            name: '错误测试工作流',
+            description: '用于测试错误处理的工作流',
+            type: 'test',
+            settings: { 
+                continueOnError: false 
+            },
+            inputData: { 
+                description: '这是一个测试错误处理的项目' 
+            }
+        });
+        
+        console.log(`创建的工作流: ${workflow2.id} - ${workflow2.name}`);
+        
+        // 添加步骤，包括一个会产生错误的步骤
+        console.log('\n测试添加步骤（包含错误步骤）...');
+        const errorStep1 = await workflowStepFactory.createRequirementsAnalysisStep(
+            '需求分析',
+            '分析项目需求',
+            { message: '分析项目需求' }
         );
         
-        // 添加工作流到管理器
-        workflowManager.addWorkflow(workflow2);
-        
-        // 测试执行会失败的工作流
-        console.log('\n测试执行会失败的工作流...');
-        await workflowExecutor.executeWorkflow('workflow-2');
-        
-        // 等待一段时间，让工作流执行到失败
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // 测试重试当前步骤
-        console.log('\n测试重试当前步骤...');
-        try {
-            await workflowExecutor.retryCurrentStep('workflow-2');
-        } catch (error) {
-            console.error(`重试当前步骤失败: ${error}`);
-        }
-        
-        // 等待一段时间
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // 测试跳过当前步骤
-        console.log('\n测试跳过当前步骤...');
-        try {
-            await workflowExecutor.skipCurrentStep('workflow-2');
-        } catch (error) {
-            console.error(`跳过当前步骤失败: ${error}`);
-        }
-        
-        // 等待一段时间
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // 创建一个会在失败时继续的工作流
-        const workflow3 = new MockWorkflow(
-            'workflow-3',
-            '测试工作流 3（失败时继续）',
-            '用于测试失败时继续的工作流',
-            'test',
-            { settings: { continueOnError: true } },
-            [
-                new MockWorkflowStep('步骤 1', '第一个步骤', false, 500),
-                new MockWorkflowStep('步骤 2', '第二个步骤（会失败）', true, 500),
-                new MockWorkflowStep('步骤 3', '第三个步骤', false, 500)
-            ]
+        const errorStep2 = await workflowStepFactory.createErrorStep(
+            '错误步骤',
+            '这个步骤会产生错误',
+            { message: '产生错误' }
         );
         
-        // 添加工作流到管理器
-        workflowManager.addWorkflow(workflow3);
+        const errorStep3 = await workflowStepFactory.createCodeGenerationStep(
+            '代码生成',
+            '生成代码',
+            { message: '生成代码' }
+        );
         
-        // 测试执行会在失败时继续的工作流
-        console.log('\n测试执行会在失败时继续的工作流...');
-        await workflowExecutor.executeWorkflow('workflow-3');
+        await workflowManager.addWorkflowStep(workflow2.id, errorStep1);
+        await workflowManager.addWorkflowStep(workflow2.id, errorStep2);
+        await workflowManager.addWorkflowStep(workflow2.id, errorStep3);
         
-        // 等待足够长的时间，让所有工作流执行完成
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // 测试执行包含错误步骤的工作流
+        console.log('\n测试执行包含错误步骤的工作流...');
+        try {
+            await workflowExecutor.executeWorkflow(workflow2.id);
+            
+            // 等待一段时间，让工作流执行
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // 测试重试当前步骤
+            console.log('\n测试重试当前步骤...');
+            try {
+                await workflowExecutor.retryCurrentStep(workflow2.id);
+            } catch (error: any) {
+                console.log('重试步骤时捕获到错误:', error.message);
+            }
+            
+            // 测试跳过当前步骤
+            console.log('\n测试跳过当前步骤...');
+            await workflowExecutor.skipCurrentStep(workflow2.id);
+            
+            // 继续执行工作流
+            console.log('\n测试跳过错误步骤后继续执行工作流...');
+            await workflowExecutor.executeWorkflow(workflow2.id);
+        } catch (error: any) {
+            console.log('执行工作流时捕获到错误:', error.message);
+        }
+        
+        // 测试删除工作流
+        console.log('\n测试删除工作流...');
+        const deleteResult1 = await workflowManager.removeWorkflow(workflow1.id);
+        const deleteResult2 = await workflowManager.removeWorkflow(workflow2.id);
+        
+        console.log(`删除工作流结果: ${deleteResult1}, ${deleteResult2}`);
         
         console.log('\n测试完成!');
         
-        // 清理所有定时器
+        // 退出程序
         process.exit(0);
     } catch (error) {
         console.error('测试失败:', error);
