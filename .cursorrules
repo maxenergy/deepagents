@@ -106,6 +106,9 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
 - 在实现接口方法时，需要确保方法签名与接口定义完全匹配，特别是参数类型和返回类型
 - 在使用 StorageManager 时，需要先通过 getStorage 方法获取特定命名空间的存储实例，然后再调用存储实例的 get 和 set 方法
 - 实现 IUIComponent 接口时，需要实现所有必要的方法和属性，包括 type、state、initialize、show、hide、postMessage 和 handleMessage 等
+- 在 VSCode 扩展中，确保 package.json 中的视图 ID 与代码中使用的视图 ID 完全一致，特别是在 registerWebviewViewProvider 调用中
+- 在 VSCode 扩展中，需要添加适当的激活事件（activationEvents），如 onCommand 和 onView，以确保扩展在需要时被激活
+- 在 VSCode 扩展中，WebView 需要加载 JavaScript 和 CSS 文件，这些文件应该放在 media 目录中，并通过 webview.asWebviewUri 方法转换为 WebView 可访问的 URI
 
 # Scratchpad
 
