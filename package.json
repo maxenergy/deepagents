@@ -3,13 +3,36 @@
   "displayName": "DeepAgents",
   "description": "多代理自动化开发工具",
   "version": "0.1.0",
+  "publisher": "deepagents-team",
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Programming Languages",
+    "Machine Learning",
+    "Snippets"
   ],
-  "activationEvents": [],
+  "keywords": [
+    "agent",
+    "llm",
+    "ai",
+    "development",
+    "automation"
+  ],
+  "icon": "assets/icon.png",
+  "galleryBanner": {
+    "color": "#C80000",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onCommand:deepagents.start",
+    "onCommand:deepagents.showPanel",
+    "onCommand:deepagents.configure",
+    "onView:deepagents.agentsView",
+    "onView:deepagents.workflowsView",
+    "onView:deepagents.projectsView"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -44,8 +67,13 @@
         },
         {
           "type": "webview",
-          "id": "deepagents.workflowView",
+          "id": "deepagents.workflowsView",
           "name": "工作流"
+        },
+        {
+          "type": "webview",
+          "id": "deepagents.projectsView",
+          "name": "项目管理"
         }
       ]
     },
@@ -108,12 +136,14 @@
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "publish": "vsce package && vsce publish"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",
     "@types/jest": "^29.5.14",
     "@types/mocha": "^10.0.1",
+    "@types/mock-require": "^3.0.0",
     "@types/node": "16.x",
     "@types/react": "^18.2.15",
     "@types/react-dom": "^18.2.7",
@@ -122,14 +152,17 @@
     "@typescript-eslint/eslint-plugin": "^5.59.1",
     "@typescript-eslint/parser": "^5.59.1",
     "@vscode/test-electron": "^2.3.0",
+    "@vscode/vsce": "^2.32.0",
     "css-loader": "^6.8.1",
     "eslint": "^8.39.0",
     "glob": "^8.1.0",
     "jest": "^29.7.0",
     "mocha": "^10.2.0",
+    "mock-require": "^3.0.3",
     "style-loader": "^3.3.3",
     "ts-jest": "^29.2.6",
     "ts-loader": "^9.4.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5.8.2",
     "webpack": "^5.81.0",
     "webpack-cli": "^5.0.2"
@@ -150,8 +183,7 @@
     "type": "git",
     "url": "git+https://github.com/maxenergy/deepagents.git"
   },
-  "keywords": [],
-  "author": "",
+  "author": "DeepAgents Team",
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/maxenergy/deepagents/issues"
