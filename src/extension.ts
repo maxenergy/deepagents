@@ -11,6 +11,7 @@ import { WorkflowEngine } from './workflows/WorkflowEngine';
 import { WorkflowCommandHandler } from './workflows/WorkflowCommandHandler';
 import { WorkflowsViewProvider } from './ui/providers/WorkflowsViewProvider';
 import { ProjectsViewProvider } from './ui/providers/ProjectsViewProvider';
+import { AgentsViewProvider } from './ui/providers/AgentsViewProvider';
 import { ProjectManager } from './projects/ProjectManager';
 import { UIComponentType } from './ui/IUIComponent';
 
@@ -46,6 +47,15 @@ export async function activate(context: vscode.ExtensionContext) {
     // 初始化工作流命令处理器
     const workflowCommandHandler = new WorkflowCommandHandler(context, workflowManager, agentManager);
 
+    // 注册代理视图提供器
+    const agentsViewProvider = new AgentsViewProvider(context, agentManager);
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(
+        AgentsViewProvider.viewType,
+        agentsViewProvider
+      )
+    );
+
     // 注册工作流视图提供器
     const workflowsViewProvider = new WorkflowsViewProvider(context, workflowManager);
     context.subscriptions.push(
@@ -65,6 +75,12 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     // 初始化 UI 组件
+    await agentsViewProvider.initialize(context, {
+      id: 'agents_view',
+      title: '代理管理',
+      type: UIComponentType.WEBVIEW_VIEW
+    });
+
     await workflowsViewProvider.initialize(context, {
       id: 'workflows_view',
       title: '工作流管理',
@@ -109,6 +125,12 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.commands.registerCommand('deepagents.showProjects', () => {
         vscode.commands.executeCommand('deepagents.projectsView.focus');
+      })
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand('deepagents.showAgents', () => {
+        vscode.commands.executeCommand('deepagents.agentsView.focus');
       })
     );
 
